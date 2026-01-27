@@ -49,6 +49,7 @@
     "three-mesh-bvh": "^0.9.5",
     "typescript": "^5.9.2",
     "vite": "^6.2.2",
+    "esbuild": "^0.25.12",
     "yargs": "^17.5.1"
   },
   "peerDependencies": {
@@ -70,7 +71,7 @@
     "type": "git",
     "url": "git+https://github.com/gkjohnson/three-gpu-pathtracer.git"
   },
-  "author": "Garrett Johnson <garrett.kjohnson@gmail.com>",
+  "author": "Adithya <adithya.p@position2.com>",
   "license": "MIT",
   "bugs": {
     "url": "https://github.com/gkjohnson/three-gpu-pathtracer/issues"

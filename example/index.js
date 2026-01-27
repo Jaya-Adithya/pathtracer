@@ -17,6 +17,9 @@ import {
 	Texture,
 	Color,
 	Vector3,
+	SRGBColorSpace,
+	LinearMipmapLinearFilter,
+	LinearFilter,
 } from 'three';
 import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js';
 import { HDRLoader } from 'three/examples/jsm/loaders/HDRLoader.js';
@@ -113,7 +116,7 @@ const params = {
 	floorRoughness: 0.2,
 	floorMetalness: 0.2,
 
-	screenBrightness: 1.0,
+	screenBrightness: 2.5, // ✅ FIX: Higher default for realistic screen brightness
 	screenWallpaper: 'blank_screen', // Selected wallpaper
 
 	...getScaledSettings(),
@@ -452,10 +455,10 @@ function buildGui() {
 
 		const screenFolder = gui.addFolder( 'Screen' );
 
-		// Build wallpaper options list
-		const wallpaperOptions = [ 'blank_screen', 'blue_bloom', 'aurora_borealis', 'feather_light', 'asus_1', 'asus_2', 'custom' ];
+		// Build wallpaper options list - include "Off screen" option to hide all wallpapers
+		const wallpaperOptions = [ 'off_screen', 'blank_screen', 'blue_bloom', 'aurora_borealis', 'feather_light', 'asus_1', 'asus_2', 'custom' ];
 		const availableWallpapers = wallpaperOptions.filter( option => {
-			if ( option === 'custom' ) return true;
+			if ( option === 'custom' || option === 'off_screen' ) return true;
 			return wallpaperMeshes[ option ] !== null;
 		} );
 
@@ -488,8 +491,10 @@ function buildGui() {
 
 		} }, 'uploadImage' ).name( 'Upload Custom' );
 
-		// Add brightness control
-		screenFolder.add( params, 'screenBrightness', 0, 5, 0.1 ).onChange( ( value ) => {
+		// ✅ FIX: Improved brightness control for realistic screen appearance
+		// Range 0-10 allows for very bright screens (like real displays)
+		// The emissiveIntensity directly controls how much light the screen emits
+		screenFolder.add( params, 'screenBrightness', 0, 10, 0.1 ).onChange( ( value ) => {
 
 			params.screenBrightness = value; // Update params
 			if ( screenMesh && screenMesh.material ) {
@@ -499,9 +504,19 @@ function buildGui() {
 					: [ screenMesh.material ];
 				materials.forEach( ( material ) => {
 
+					// ✅ FIX: Set emissive intensity for realistic brightness
 					material.emissiveIntensity = value;
+					
+					// Ensure emissive color is white for proper color reproduction
+					if ( material.emissive ) {
+						material.emissive.setHex( 0xffffff );
+					}
+					
+					material.needsUpdate = true;
 
 				} );
+				
+				// Update path tracer and reset for immediate visual feedback
 				pathTracer.updateMaterials();
 				pathTracer.reset();
 
@@ -731,6 +746,8 @@ function findScreenMesh(model) {
 }
 
 // Function to find all wallpaper meshes/groups
+// Uses dynamic detection based on numeric prefix pattern (e.g., 01_Blue_Bloom, 03_Feather_Light)
+// Similar to the reference implementation in GLBViewer.jsx
 function findAllWallpaperMeshes( model ) {
 
 	const wallpapers = {
@@ -742,94 +759,116 @@ function findAllWallpaperMeshes( model ) {
 		'asus_2': null,
 	};
 
-	// Patterns to search for each wallpaper (more specific patterns first)
-	const patterns = {
-		'blank_screen': [ 'blank_screen', 'screen_blank', 'blank' ],
-		'blue_bloom': [ 'blue_bloom', 'bluebloom', 'blue', 'bloom' ],
-		'aurora_borealis': [ 'aurora_borealis', 'auroraborealis', 'aurora', 'borealis' ],
-		'feather_light': [ 'feather_light', 'featherlight', 'feather', 'feat', 'light' ],
-		'asus_1': [ 'asus_1', 'asus1' ],
-		'asus_2': [ 'asus_2', 'asus2' ],
-	};
+	// Map to store all found wallpaper meshes by their actual mesh name
+	const wallpaperMeshesByName = new Map();
+	
+	// Also look for screen_blank for custom wallpapers
+	let wallpaperGroup = null;
+	let screenBlankMesh = null;
 
-	// First pass: look for exact mesh matches
+	// First pass: Look for meshes with numeric prefix pattern (e.g., 01_Blue_Bloom, 03_Feather_Light)
+	// This is the dynamic approach - detects wallpapers based on actual GLB structure
 	model.traverse( ( child ) => {
+
+		if ( child.isGroup && child.name === 'wallpaper' ) {
+			wallpaperGroup = child;
+			console.log( `✅ [WALLPAPER GROUP] Found: ${child.name}` );
+		}
 
 		if ( child.isMesh && child.material ) {
 
-			const name = child.name.toLowerCase();
-			const parentName = child.parent?.name?.toLowerCase() || '';
+			const name = child.name;
+			const nameLower = name.toLowerCase();
+			const parentName = child.parent?.name || '';
+			const parentNameLower = parentName.toLowerCase();
 
-			// Check each wallpaper pattern
-			for ( const [ wallpaperKey, patternList ] of Object.entries( patterns ) ) {
+			// Find screen_blank for custom wallpapers
+			if ( name === 'screen_blank' ) {
+				screenBlankMesh = child;
+				console.log( `✅ [SCREEN BLANK] Found: ${name} (parent: ${parentName})` );
+			}
 
-				for ( const pattern of patternList ) {
+			// Look for meshes with numeric prefix pattern: /^\d+_/
+			// This matches patterns like: 01_Blue_Bloom, 02_Aurora_Borealis, 03_Feather_Light
+			const numericPrefixMatch = name.match( /^(\d+)_(.+)/ );
+			
+			if ( numericPrefixMatch ) {
+				// Found a mesh with numeric prefix - this is likely a wallpaper
+				const wallpaperName = numericPrefixMatch[ 2 ]; // The name after the prefix
+				const wallpaperNameLower = wallpaperName.toLowerCase();
+				
+				// Store by actual mesh name
+				wallpaperMeshesByName.set( name, child );
+				console.log( `✅ [WALLPAPER MESH] Found: ${name} (parent: ${parentName})` );
 
-					if ( name.includes( pattern ) ) {
+				// Also try to map to normalized keys for backward compatibility
+				// Extract core name (remove "vertical" prefix if present)
+				let coreName = wallpaperNameLower;
+				coreName = coreName.replace( /^vertical_?/i, '' );
+				coreName = coreName.replace( /_?vertical_?/i, '' );
+				coreName = coreName.replace( /__+/g, '_' );
+				coreName = coreName.replace( /^_+|_+$/g, '' );
 
-						if ( ! wallpapers[ wallpaperKey ] ) {
-
-							wallpapers[ wallpaperKey ] = child;
-							console.log( `✅ Found wallpaper "${wallpaperKey}" mesh:`, child.name, 'Parent:', child.parent?.name );
-							break; // Found this wallpaper, move to next
-
-						}
-
+				// Map to known wallpaper keys based on core name
+				// This allows matching "feather_light" even if the mesh is named "03_Feather_Light" or "03_feather_light"
+				if ( coreName.includes( 'blank' ) || coreName.includes( 'screen_blank' ) ) {
+					if ( ! wallpapers[ 'blank_screen' ] ) {
+						wallpapers[ 'blank_screen' ] = child;
 					}
-
+				} else if ( coreName.includes( 'blue' ) && coreName.includes( 'bloom' ) ) {
+					if ( ! wallpapers[ 'blue_bloom' ] ) {
+						wallpapers[ 'blue_bloom' ] = child;
+					}
+				} else if ( coreName.includes( 'aurora' ) || coreName.includes( 'borealis' ) ) {
+					if ( ! wallpapers[ 'aurora_borealis' ] ) {
+						wallpapers[ 'aurora_borealis' ] = child;
+					}
+				} else if ( coreName.includes( 'feather' ) && coreName.includes( 'light' ) ) {
+					// ✅ FIX: Only match if BOTH "feather" AND "light" are present
+					// This prevents false matches with meshes that only have "feather" or only "light"
+					if ( ! wallpapers[ 'feather_light' ] ) {
+						wallpapers[ 'feather_light' ] = child;
+						console.log( `✅ Mapped "${name}" to "feather_light" (core: "${coreName}")` );
+					}
+				} else if ( coreName === 'asus_1' || coreName === 'asus1' ) {
+					if ( ! wallpapers[ 'asus_1' ] ) {
+						wallpapers[ 'asus_1' ] = child;
+					}
+				} else if ( coreName === 'asus_2' || coreName === 'asus2' ) {
+					if ( ! wallpapers[ 'asus_2' ] ) {
+						wallpapers[ 'asus_2' ] = child;
+					}
 				}
+			}
 
+			// Also check for meshes inside "wallpaper" group (if parent is "wallpaper")
+			// This matches the reference implementation pattern
+			if ( parentNameLower === 'wallpaper' && /^\d+_/.test( name ) ) {
+				// Already handled above, but ensure it's stored
+				if ( ! wallpaperMeshesByName.has( name ) ) {
+					wallpaperMeshesByName.set( name, child );
+					console.log( `✅ [WALLPAPER MESH] Found in wallpaper group: ${name}` );
+				}
 			}
 
 		}
 
 	} );
 
-	// Second pass: look for groups and nested meshes
-	model.traverse( ( child ) => {
+	// Store screen_blank if found
+	if ( screenBlankMesh ) {
+		wallpaperMeshesByName.set( 'screen_blank', screenBlankMesh );
+	}
 
-		if ( child.isGroup ) {
-
-			const name = child.name.toLowerCase();
-
-			// Check if this group matches a wallpaper pattern
-			for ( const [ wallpaperKey, patternList ] of Object.entries( patterns ) ) {
-
-				// Skip if already found
-				if ( wallpapers[ wallpaperKey ] ) continue;
-
-				for ( const pattern of patternList ) {
-
-					if ( name.includes( pattern ) ) {
-
-						// Look for meshes inside this group
-						child.traverse( ( mesh ) => {
-
-							if ( mesh.isMesh && mesh.material ) {
-
-								if ( ! wallpapers[ wallpaperKey ] ) {
-
-									wallpapers[ wallpaperKey ] = mesh;
-									console.log( `✅ Found wallpaper "${wallpaperKey}" in group:`, mesh.name, 'Group:', child.name );
-									return; // Found, stop traversing this group
-
-								}
-
-							}
-
-						} );
-
-						if ( wallpapers[ wallpaperKey ] ) break;
-
-					}
-
-				}
-
-			}
-
-		}
-
+	// Log all found wallpapers
+	console.log( `📋 Available wallpaper meshes (${wallpaperMeshesByName.size} total):` );
+	wallpaperMeshesByName.forEach( ( mesh, name ) => {
+		console.log( `   - ${name}` );
 	} );
+
+	// Store the map for use in updateWallpaperVisibility
+	wallpaperMeshesByName._wallpaperGroup = wallpaperGroup;
+	wallpaperMeshesByName._screenBlank = screenBlankMesh;
 
 	return wallpapers;
 
@@ -859,52 +898,119 @@ async function updateWallpaperVisibility( selectedWallpaper ) {
 			const name = child.name.toLowerCase();
 			const parentName = child.parent?.name?.toLowerCase() || '';
 
-			// Check if this is a screen-related mesh
-			if (
-				name.includes( 'blank' ) ||
-				name.includes( 'blue' ) ||
-				name.includes( 'bloom' ) ||
-				name.includes( 'aurora' ) ||
-				name.includes( 'borealis' ) ||
-				name.includes( 'feather' ) ||
-				name.includes( 'feat' ) ||
-				name.includes( 'light' ) ||
-				name.includes( 'asus' ) ||
-				name.includes( 'screen' ) ||
-				name.includes( 'rgb' ) ||
-				parentName.includes( 'screen' )
-			) {
+			// Check if this is a wallpaper mesh (NOT screen component meshes)
+			// Screen components like screen_panel, screen_backlight, screen_filter, screen_mirror, screen_bezel should NOT be collected
+			const isScreenComponent = name.includes( 'screen_panel' ) ||
+									  name.includes( 'screen_backlight' ) ||
+									  name.includes( 'screen_filter' ) ||
+									  name.includes( 'screen_mirror' ) ||
+									  name.includes( 'screen_bezel' ) ||
+									  name.includes( 'display008' ) ||
+									  name.includes( 'display006' ) ||
+									  name.includes( 'display005' ) ||
+									  name.includes( 'display007' ) ||
+									  parentName.includes( 'screen_backlight' ) ||
+									  parentName.includes( 'screen_filter' ) ||
+									  parentName.includes( 'screen_mirror' ) ||
+									  parentName.includes( 'screen_rgb' ) ||
+									  ( parentName.includes( 'displayctrl' ) && !parentName.includes( 'wallpaper' ) );
+			
+			// ✅ DYNAMIC DETECTION: Use actual found wallpaper meshes instead of hardcoded patterns
+			// Check if this mesh is one of the found wallpaper meshes
+			const originalName = child.name; // Keep original case for matching
+			const isFoundWallpaper = Object.values( wallpaperMeshes ).some( mesh => mesh === child );
+			const hasNumericPrefix = /^\d+_/.test( originalName );
+			const isInWallpaperGroup = parentName === 'wallpaper';
+			const isScreenBlank = originalName === 'screen_blank';
+			
+			// Collect meshes that are:
+			// 1. Found wallpapers from findAllWallpaperMeshes
+			// 2. Meshes with numeric prefix (dynamic wallpaper detection)
+			// 3. screen_blank for custom wallpapers
+			// 4. Meshes in wallpaper group
+			// 5. screen_rgb meshes (legacy support)
+			const isWallpaperMesh = !isScreenComponent && (
+				isFoundWallpaper ||
+				( hasNumericPrefix && ( isInWallpaperGroup || true ) ) || // Allow numeric prefix anywhere
+				isScreenBlank ||
+				( name.includes( 'rgb' ) && parentName.includes( 'screen' ) && !parentName.includes( 'screenctrl' ) )
+			);
+
+			if ( isWallpaperMesh ) {
 
 				// Get world position to determine depth/priority (Z position = distance from camera/screen)
 				child.updateMatrixWorld( true );
 				const worldPos = new Vector3();
 				child.getWorldPosition( worldPos );
 
-			// Determine priority based on name patterns (more specific = higher priority)
+			// ✅ DYNAMIC PRIORITY: Determine wallpaper type based on actual found meshes
 			let priority = 0;
 			let wallpaperType = 'unknown';
 			
-			if ( name.includes( 'blank' ) || name.includes( 'screen_blank' ) ) {
+			// Check against found wallpaper meshes first (most reliable)
+			if ( wallpaperMeshes[ 'blank_screen' ] === child || isScreenBlank ) {
 				priority = 100;
 				wallpaperType = 'blank_screen';
-			} else if ( name.includes( 'blue' ) && name.includes( 'bloom' ) ) {
+			} else if ( wallpaperMeshes[ 'blue_bloom' ] === child ) {
 				priority = 90;
 				wallpaperType = 'blue_bloom';
-			} else if ( name.includes( 'aurora' ) || name.includes( 'borealis' ) ) {
+			} else if ( wallpaperMeshes[ 'aurora_borealis' ] === child ) {
 				priority = 80;
 				wallpaperType = 'aurora_borealis';
-			} else if ( name.includes( 'feather' ) || ( name.includes( 'feat' ) && name.includes( 'light' ) ) ) {
+			} else if ( wallpaperMeshes[ 'feather_light' ] === child ) {
+				// ✅ FIX: Use the actual found mesh instead of pattern matching
 				priority = 70;
 				wallpaperType = 'feather_light';
-			} else if ( name === 'asus_1' || name.includes( 'asus_1' ) || name.includes( 'asus1' ) ) {
+			} else if ( wallpaperMeshes[ 'asus_1' ] === child ) {
 				priority = 60;
 				wallpaperType = 'asus_1';
-			} else if ( name === 'asus_2' || name.includes( 'asus_2' ) || name.includes( 'asus2' ) ) {
+			} else if ( wallpaperMeshes[ 'asus_2' ] === child ) {
 				priority = 55;
 				wallpaperType = 'asus_2';
-			} else if ( name.includes( 'rgb' ) || parentName.includes( 'screen' ) ) {
+			} else if ( name.includes( 'rgb' ) && parentName.includes( 'screen' ) && !parentName.includes( 'screenctrl' ) ) {
 				priority = 50;
 				wallpaperType = 'screen_rgb';
+			} else if ( hasNumericPrefix ) {
+				// Dynamic wallpaper with numeric prefix - extract core name for type
+				const match = originalName.match( /^\d+_(.+)/ );
+				if ( match ) {
+					let coreName = match[ 1 ].toLowerCase();
+					coreName = coreName.replace( /^vertical_?/i, '' );
+					coreName = coreName.replace( /_?vertical_?/i, '' );
+					coreName = coreName.replace( /__+/g, '_' );
+					coreName = coreName.replace( /^_+|_+$/g, '' );
+					
+					// Map to known types based on core name
+					if ( coreName.includes( 'blank' ) ) {
+						priority = 100;
+						wallpaperType = 'blank_screen';
+					} else if ( coreName.includes( 'blue' ) && coreName.includes( 'bloom' ) ) {
+						priority = 90;
+						wallpaperType = 'blue_bloom';
+					} else if ( coreName.includes( 'aurora' ) || coreName.includes( 'borealis' ) ) {
+						priority = 80;
+						wallpaperType = 'aurora_borealis';
+					} else if ( coreName.includes( 'feather' ) && coreName.includes( 'light' ) ) {
+						// ✅ FIX: Require BOTH "feather" AND "light" to prevent false matches
+						priority = 70;
+						wallpaperType = 'feather_light';
+					} else if ( coreName === 'asus_1' || coreName === 'asus1' ) {
+						priority = 60;
+						wallpaperType = 'asus_1';
+					} else if ( coreName === 'asus_2' || coreName === 'asus2' ) {
+						priority = 55;
+						wallpaperType = 'asus_2';
+					} else {
+						priority = 40;
+						wallpaperType = coreName; // Use core name as type
+					}
+				} else {
+					priority = 40;
+					wallpaperType = 'wallpaper';
+				}
+			} else if ( isInWallpaperGroup ) {
+				priority = 40;
+				wallpaperType = 'wallpaper';
 			} else {
 				priority = 10;
 			}
@@ -967,14 +1073,14 @@ async function updateWallpaperVisibility( selectedWallpaper ) {
 		hiddenMeshesList.push( info );
 		
 		// Also hide parent groups that might contain wallpapers
+		// IMPORTANT: Only hide groups that are specifically wallpaper groups, NOT screen component groups
 		let parent = info.mesh.parent;
 		while ( parent && parent !== model ) {
 
 			const parentName = parent.name?.toLowerCase() || '';
-			// Hide groups that contain wallpapers (wallpaper, screen, rgb groups)
-			if ( parentName.includes( 'wallpaper' ) || 
-				 ( parentName.includes( 'screen' ) && ! parentName.includes( 'screenctrl' ) ) ||
-				 parentName.includes( 'rgb' ) ) {
+			// Only hide groups that are specifically wallpaper groups
+			// Do NOT hide screenCTRL, displayCTRL, or screen component groups (screen_backlight, screen_filter, etc.)
+			if ( parentName.includes( 'wallpaper' ) ) {
 
 				if ( ! hiddenGroups.has( parent ) ) {
 
@@ -1008,7 +1114,18 @@ async function updateWallpaperVisibility( selectedWallpaper ) {
 	let targetMesh = null;
 	let targetMeshInfo = null;
 
-	if ( selectedWallpaper === 'custom' ) {
+	// ✅ FIX: Handle "Off screen" mode - hide ALL wallpapers, don't show anything
+	const isScreenOff = selectedWallpaper === 'off_screen' || selectedWallpaper === 'Off screen' || !selectedWallpaper;
+	
+	if ( isScreenOff ) {
+
+		console.log( `\n📴 SCREEN OFF MODE - Hiding all wallpapers` );
+		console.log( `   All ${hiddenMeshesList.length} meshes remain hidden` );
+		console.log( `   No target mesh will be shown` );
+		// Don't set targetMesh - all wallpapers stay hidden
+		// This is the correct behavior for "Off screen"
+
+	} else if ( selectedWallpaper === 'custom' ) {
 
 		console.log( `\n🎯 CUSTOM WALLPAPER MODE` );
 		console.log( `   screenMesh exists:`, !! screenMesh );
@@ -1108,15 +1225,15 @@ async function updateWallpaperVisibility( selectedWallpaper ) {
 		
 		// IMPORTANT: Hide any sibling groups that might contain other wallpapers
 		// Traverse the model and hide any wallpaper groups that are NOT in the visible chain
+		// ONLY hide wallpaper groups, NOT screen component groups
 		model.traverse( ( child ) => {
 
 			if ( child.isGroup ) {
 
 				const name = child.name?.toLowerCase() || '';
-				// If this is a wallpaper/screen group but NOT in the visible chain, hide it
-				if ( ( name.includes( 'wallpaper' ) || 
-					   ( name.includes( 'screen' ) && name.includes( 'rgb' ) ) ||
-					   name.includes( 'rgb' ) ) &&
+				// Only hide groups that are specifically wallpaper groups
+				// Do NOT hide screenCTRL, displayCTRL, or screen component groups
+				if ( name.includes( 'wallpaper' ) &&
 					 ! visibleParentChain.has( child ) &&
 					 child !== targetMesh.parent ) {
 
@@ -1221,10 +1338,25 @@ async function handleImageUpload( file ) {
 
 			console.log( `✅ Image loaded: ${img.width}x${img.height}` );
 
-			// Create texture from uploaded image
+			// Create texture from uploaded image with proper settings for PathTracer
 			const texture = new Texture( img );
+			
+			// ✅ FIX: flipY = true for uploaded images (HTML Image objects are upside down in WebGL)
+			texture.flipY = true;
+			
+			// ✅ FIX: Proper color space for correct color reproduction
+			texture.colorSpace = SRGBColorSpace;
+			
+			// ✅ FIX: Enable mipmaps for better quality in PathTracer
+			texture.generateMipmaps = true;
+			texture.minFilter = LinearMipmapLinearFilter;
+			texture.magFilter = LinearFilter;
+			
+			// ✅ FIX: Anisotropic filtering for sharper textures at angles
+			texture.anisotropy = 16;
+			
 			texture.needsUpdate = true;
-			console.log( `✅ Texture created` );
+			console.log( `✅ Texture created with proper quality settings (flipY: true, colorSpace: sRGB, mipmaps: enabled)` );
 
 			// Find the screen mesh if not already found
 			if ( ! screenMesh && model ) {
