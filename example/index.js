@@ -236,6 +236,13 @@ async function init() {
 	renderer.domElement.addEventListener('mouseleave', () => endBackgroundDrag().catch(() => { }));
 	renderer.domElement.addEventListener('wheel', onBackgroundWheel, { passive: false });
 
+	// Prevent context menu on right click
+	renderer.domElement.addEventListener('contextmenu', (e) => {
+		if (isBackgroundModeActive()) {
+			e.preventDefault();
+		}
+	});
+
 	// scene
 	scene = new Scene();
 	scene.background = gradientMap;
@@ -410,10 +417,35 @@ function moveBackgroundDrag(e) {
 	const dx = e.clientX - _bgPrevX;
 	const dy = e.clientY - _bgPrevY;
 
-	const rotSpeed = 0.005;
-	contentGroup.rotation.y += dx * rotSpeed;
-	contentGroup.rotation.x += dy * rotSpeed;
-	contentGroup.rotation.x = Math.max(- Math.PI / 2, Math.min(Math.PI / 2, contentGroup.rotation.x));
+	// Check mouse buttons: 1 = Left (Rotate), 2 = Right (Pan)
+	// (Note: e.buttons is a bitmask, 1=left, 2=right, 4=middle)
+	if (e.buttons & 1) { // Left click: Rotate
+
+		const rotSpeed = 0.005;
+		contentGroup.rotation.y += dx * rotSpeed;
+		contentGroup.rotation.x += dy * rotSpeed;
+		contentGroup.rotation.x = Math.max(- Math.PI / 2, Math.min(Math.PI / 2, contentGroup.rotation.x));
+
+	} else if (e.buttons & 2) { // Right click: Pan
+
+		// Panning moves the contentGroup relative to the camera
+		// Since background plane is fixed to camera, moving contentGroup works well.
+		// We need to move it in camera-space X/Y, but contentGroup is in world space.
+		// For simplicity, assuming camera is roughly looking at Z, we pan X/Y.
+		// For better panning, we should use camera right/up vectors, but simple X/Y pan matches the screen plane roughly for this view.
+
+		const panSpeed = 0.005 * (activeCamera.position.z || 5); // Scale with distance roughly
+		const panX = dx * panSpeed * 0.2; // Adjust sensitivity
+		const panY = -dy * panSpeed * 0.2;
+
+		// Move contentGroup in camera space
+		const right = new Vector3(1, 0, 0).applyQuaternion(activeCamera.quaternion);
+		const up = new Vector3(0, 1, 0).applyQuaternion(activeCamera.quaternion);
+
+		contentGroup.position.addScaledVector(right, panX);
+		contentGroup.position.addScaledVector(up, panY);
+
+	}
 
 	_bgPrevX = e.clientX;
 	_bgPrevY = e.clientY;
