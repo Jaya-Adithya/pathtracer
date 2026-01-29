@@ -20,6 +20,7 @@ import {
 	SRGBColorSpace,
 	LinearMipmapLinearFilter,
 	LinearFilter,
+	AnimationMixer,
 } from 'three';
 import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js';
 import { HDRLoader } from 'three/examples/jsm/loaders/HDRLoader.js';
@@ -119,9 +120,14 @@ const params = {
 	floorRoughness: 0.2,
 	floorMetalness: 0.2,
 
-	screenBrightness: 2.5, // ✅ FIX: Higher default for realistic screen brightness
+	screenBrightness: 1, // Predefined wallpapers: 1; custom wallpaper defaults to 4.5 when selected
 	screenWallpaper: 'blank_screen', // Selected wallpaper
-	screenSaturation: 1.0, // ✅ NEW: Saturation control (0 = grayscale, 1 = normal, 2 = oversaturated)
+	screenSaturation: 1, // Predefined wallpapers: 1; custom wallpaper defaults to 0.9 when selected (0 = grayscale, 1 = normal, 2 = oversaturated)
+
+	// Animation frame control (like GLBViewer: 0–150 frames at 30fps)
+	animationFrame: 35,
+	// Screen on/off in Animation folder (On | Off screen)
+	animationScreen: 'On',
 
 };
 
@@ -137,6 +143,11 @@ let uploadedImage = null; // ✅ NEW: Store original image for brightness/satura
 let wallpaperMeshes = {}; // Store all wallpaper meshes: { 'blank_screen': mesh, 'blue_bloom': mesh, etc. }
 let currentWallpaper = 'blank_screen'; // Current selected wallpaper
 let imageRenderModal = null; // Image render modal instance
+let animationMixer = null;
+let mainAnimAction = null;
+let mainAnimClip = null;
+const ANIMATION_FRAME_RATE = 30;
+const ANIMATION_MAX_FRAME = 150;
 
 const orthoWidth = 2;
 
@@ -377,6 +388,56 @@ function buildGui() {
 
 	});
 
+	// Animation frame control at top (like GLBViewer ControlPanel: Frames 0–150)
+	if (animationMixer && mainAnimAction && mainAnimClip) {
+
+		const animationFolder = gui.addFolder('Animation');
+		const maxFrame = Math.min(ANIMATION_MAX_FRAME, Math.floor((mainAnimClip.duration || 5) * ANIMATION_FRAME_RATE));
+		animationFolder.add(params, 'animationFrame', 0, maxFrame, 1).name(`Frame (0–${maxFrame})`).onChange(async (frame) => {
+
+			const timeInSeconds = Math.min(frame / ANIMATION_FRAME_RATE, mainAnimClip.duration || 5);
+			mainAnimAction.time = timeInSeconds;
+			animationMixer.update(0);
+			// Path tracer uses a BVH built from a snapshot of the scene; raster view uses live scene.
+			// Rebuild the path tracer scene so it bakes the new pose and BVH (then it works in path tracer view).
+			scene.updateMatrixWorld(true);
+			try {
+				await pathTracer.setSceneAsync(scene, activeCamera);
+			} catch (e) {
+				console.error('Failed to update path tracer scene for animation frame', e);
+			}
+
+		});
+		// Include Off screen in Animation folder so user can turn display off from here
+		if (screenMesh || Object.keys(wallpaperMeshes).some(key => wallpaperMeshes[key] !== null)) {
+
+			params.animationScreen = (currentWallpaper === 'off_screen' || currentWallpaper === 'Off screen') ? 'Off screen' : 'On';
+			animationFolder.add(params, 'animationScreen', ['On', 'Off screen']).name('Screen').onChange(async (value) => {
+
+				if (value === 'Off screen') {
+
+					currentWallpaper = 'off_screen';
+					params.screenWallpaper = 'off_screen';
+					await updateWallpaperVisibility('off_screen');
+
+				} else {
+
+					const toShow = (params.screenWallpaper === 'off_screen' || params.screenWallpaper === 'Off screen') ? 'blank_screen' : params.screenWallpaper;
+					currentWallpaper = toShow;
+					params.screenWallpaper = toShow;
+					await updateWallpaperVisibility(toShow);
+
+				}
+				pathTracer.updateMaterials();
+				pathTracer.reset();
+
+			});
+
+		}
+		animationFolder.open();
+
+	}
+
 	const pathTracingFolder = gui.addFolder('Path Tracer');
 	pathTracingFolder.add(params, 'enable');
 	pathTracingFolder.add(params, 'pause');
@@ -468,11 +529,22 @@ function buildGui() {
 			return wallpaperMeshes[option] !== null;
 		});
 
-		// Add wallpaper dropdown
+		// Add wallpaper dropdown (includes off_screen)
 		screenFolder.add(params, 'screenWallpaper', availableWallpapers).name('Wallpaper').onChange(async (value) => {
 
 			currentWallpaper = value;
 			params.screenWallpaper = value;
+			// Custom wallpaper: defaults 4.5 brightness, 0.9 saturation; predefined: 1 and 1
+			if (value === 'custom') {
+				params.screenBrightness = 4.5;
+				params.screenSaturation = 0.9;
+			} else {
+				params.screenBrightness = 1;
+				params.screenSaturation = 1;
+			}
+			if (params.animationScreen !== undefined) {
+				params.animationScreen = (value === 'off_screen' || value === 'Off screen') ? 'Off screen' : 'On';
+			}
 			await updateWallpaperVisibility(value);
 
 		});
@@ -888,9 +960,12 @@ function findAllWallpaperMeshes(model) {
 
 	});
 
-	// Store screen_blank if found
+	// Store screen_blank if found — and assign it to wallpapers['blank_screen']
 	if (screenBlankMesh) {
 		wallpaperMeshesByName.set('screen_blank', screenBlankMesh);
+		if (!wallpapers['blank_screen']) {
+			wallpapers['blank_screen'] = screenBlankMesh;
+		}
 	}
 
 	// Log all found wallpapers
@@ -1240,6 +1315,21 @@ async function updateWallpaperVisibility(selectedWallpaper) {
 		console.log(`   Has EmissiveMap: ${targetMeshInfo?.hasEmissiveMap ? '✅ YES' : '❌ NO'}`);
 		console.log(`   ✅ Set visible = true`);
 
+		// Predefined wallpapers: apply default brightness (1) and saturation (1) so they display correctly when switching from custom
+		const isPredefined = selectedWallpaper !== 'custom' && !isScreenOff && wallpaperMeshes[selectedWallpaper];
+		if (isPredefined && targetMesh.material) {
+			const materials = Array.isArray(targetMesh.material) ? targetMesh.material : [targetMesh.material];
+			materials.forEach((material) => {
+				material.emissiveIntensity = params.screenBrightness;
+				if (material.emissive) material.emissive.setHex(0xffffff);
+				material.needsUpdate = true;
+			});
+			if (pathTracer) {
+				pathTracer.updateMaterials();
+				pathTracer.reset();
+			}
+		}
+
 		// Also make sure parent groups are visible - but ONLY the chain leading to targetMesh
 		let parent = targetMesh.parent;
 		let parentCount = 0;
@@ -1332,6 +1422,13 @@ async function updateWallpaperVisibility(selectedWallpaper) {
 
 	// Small delay to ensure visibility updates are processed
 	await new Promise(resolve => setTimeout(resolve, 10));
+
+	// Ensure current animation pose and world matrices are up-to-date before rebuilding
+	// Without this, the path tracer may capture a stale skeleton pose
+	if (animationMixer && mainAnimAction) {
+		animationMixer.update(0);
+	}
+	scene.updateMatrixWorld(true);
 
 	// Rebuild the scene - this will use traverseVisible() which only includes visible meshes
 	await pathTracer.setSceneAsync(scene, activeCamera, {
@@ -1500,6 +1597,10 @@ async function handleImageUpload(file) {
 			// ✅ NEW: Store the original image for later brightness/saturation updates
 			uploadedImage = img;
 			console.log(`✅ Stored original image for brightness/saturation processing`);
+
+			// Custom wallpaper defaults: 4.5 brightness, 0.9 saturation
+			params.screenBrightness = 4.5;
+			params.screenSaturation = 0.9;
 
 			// Find the screen mesh if not already found
 			if (!screenMesh && model) {
@@ -1686,9 +1787,10 @@ async function updateModel() {
 
 	}
 
+	let loadResult;
 	try {
 
-		model = await loadModel(modelInfo.url, v => {
+		loadResult = await loadModel(modelInfo.url, v => {
 
 			loader.setPercentage(0.5 * v);
 
@@ -1701,6 +1803,10 @@ async function updateModel() {
 		return;
 
 	}
+
+	// Support both { scene, animations } and legacy plain scene return
+	model = loadResult.scene ?? loadResult;
+	const animations = loadResult.animations ?? [];
 
 	if (!model) {
 
@@ -1772,17 +1878,11 @@ async function updateModel() {
 
 	scene.add(model);
 
-	await pathTracer.setSceneAsync(scene, activeCamera, {
-
-		onProgress: v => loader.setPercentage(0.5 + 0.5 * v),
-
-	});
-
-	// Find all wallpaper meshes
+	// 1. Find all wallpaper meshes BEFORE building the path tracer scene
 	wallpaperMeshes = findAllWallpaperMeshes(model);
 	console.log('📋 Found wallpapers:', Object.keys(wallpaperMeshes).filter(key => wallpaperMeshes[key] !== null));
 
-	// Find the screen mesh (default to blank_screen)
+	// 2. Find the screen mesh (default to blank_screen)
 	screenMesh = wallpaperMeshes['blank_screen'] || findScreenMesh(model);
 	if (screenMesh) {
 
@@ -1794,9 +1894,92 @@ async function updateModel() {
 
 	}
 
-	// Set initial wallpaper visibility
+	// 3. Set wallpaper visibility (hides non-selected wallpapers) BEFORE scene build
+	//    This avoids building the BVH twice — once with all visible, then again after hiding.
 	currentWallpaper = params.screenWallpaper || 'blank_screen';
-	await updateWallpaperVisibility(currentWallpaper);
+	{
+
+		// Inline visibility setup without setSceneAsync (we'll do that once below)
+		// Hide all wallpaper meshes first
+		model.traverse((child) => {
+
+			if (child.isMesh && child.material) {
+
+				const name = child.name;
+				const isWallpaper = /^\d+_/.test(name) || name === 'screen_blank';
+				if (isWallpaper) {
+
+					child.visible = false;
+
+				}
+
+			}
+			if (child.isGroup && child.name?.toLowerCase() === 'wallpaper') {
+
+				child.visible = false;
+
+			}
+
+		});
+
+		// Show only the selected wallpaper
+		const targetMesh = wallpaperMeshes[currentWallpaper];
+		if (targetMesh) {
+
+			targetMesh.visible = true;
+			// Make parent chain visible
+			let parent = targetMesh.parent;
+			while (parent && parent !== model) {
+
+				parent.visible = true;
+				parent = parent.parent;
+
+			}
+			console.log(`✅ Initial wallpaper "${currentWallpaper}" visible: ${targetMesh.name}`);
+
+		} else {
+
+			console.warn(`⚠️ Initial wallpaper "${currentWallpaper}" not found, all wallpapers hidden`);
+
+		}
+
+	}
+
+	// 4. Animation: setup mixer and pose BEFORE building the path tracer scene
+	if (animationMixer) {
+
+		animationMixer.stopAllAction();
+		animationMixer.uncacheRoot(model);
+		animationMixer = null;
+		mainAnimAction = null;
+		mainAnimClip = null;
+
+	}
+	if (animations.length > 0) {
+
+		animationMixer = new AnimationMixer(model);
+		const expectedNames = ['mainAnim', 'Animation'];
+		let mainClip = animations.find(c => expectedNames.includes(c.name))
+			|| animations.find(c => c.name.toLowerCase().includes('main'))
+			|| animations[0];
+		mainAnimClip = mainClip;
+		mainAnimAction = animationMixer.clipAction(mainClip);
+		mainAnimAction.play();
+		mainAnimAction.paused = true;
+		const timeInSeconds = Math.min(params.animationFrame / ANIMATION_FRAME_RATE, mainClip.duration || 5);
+		mainAnimAction.time = timeInSeconds;
+		params.animationFrame = Math.min(Math.round(timeInSeconds * ANIMATION_FRAME_RATE), ANIMATION_MAX_FRAME);
+		animationMixer.update(0);
+
+	}
+
+	// 5. Now build the path tracer scene ONCE with correct visibility + animation pose
+	scene.updateMatrixWorld(true);
+	await pathTracer.setSceneAsync(scene, activeCamera, {
+
+		onProgress: v => loader.setPercentage(0.5 + 0.5 * v),
+
+	});
 
 	loader.setPercentage(1);
 	loader.setCredits(modelInfo.credit || '');
@@ -1856,7 +2039,7 @@ async function loadModel(url, onProgress) {
 
 		});
 
-		return res.scene;
+		return { scene: res.scene, animations: [] };
 
 	} else if (/(gltf|glb)$/i.test(url)) {
 
@@ -1878,7 +2061,7 @@ async function loadModel(url, onProgress) {
 			});
 		await complete;
 
-		return gltf.scene;
+		return { scene: gltf.scene, animations: gltf.animations || [] };
 
 	} else if (/mpd$/i.test(url)) {
 
@@ -1923,7 +2106,7 @@ async function loadModel(url, onProgress) {
 
 		});
 
-		return model;
+		return { scene: model, animations: [] };
 
 	}
 

@@ -1,7 +1,7 @@
 import {
 	WebGLArrayRenderTarget,
 	RGBAFormat,
-	UnsignedByteType,
+	HalfFloatType,
 	Color,
 	RepeatWrapping,
 	LinearFilter,
@@ -37,7 +37,7 @@ export class RenderTarget2DArray extends WebGLArrayRenderTarget {
 
 		const textureOptions = {
 			format: RGBAFormat,
-			type: UnsignedByteType,
+			type: HalfFloatType,
 			minFilter: LinearFilter,
 			magFilter: LinearFilter,
 			wrapS: RepeatWrapping,
