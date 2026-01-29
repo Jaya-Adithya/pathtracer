@@ -22,7 +22,7 @@ export class ImageRenderModal {
 			tiles: { x: 1, y: 1 },
 			bounces: 5,
 			renderScale: 1,
-			filterGlossyFactor: 0.5,
+			filterGlossyFactor: 0.1,
 			multipleImportanceSampling: true,
 			toneMapping: null
 		};

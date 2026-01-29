@@ -112,7 +112,7 @@ const params = {
 
 	enable: true,
 	bounces: 5,
-	filterGlossyFactor: 0.5,
+	filterGlossyFactor: 0.1,
 	pause: false,
 
 	floorColor: '#111111',
@@ -341,7 +341,8 @@ function onHashChange() {
 
 	if (!(hashModel in models)) {
 
-		hashModel = Object.keys(models)[0];
+		// Default to Headphone Static if available, otherwise first model in list
+		hashModel = 'Headphone Static' in models ? 'Headphone Static' : Object.keys(models)[0];
 
 	}
 
@@ -408,8 +409,8 @@ function buildGui() {
 			}
 
 		});
-		// Include Off screen in Animation folder so user can turn display off from here
-		if (screenMesh || Object.keys(wallpaperMeshes).some(key => wallpaperMeshes[key] !== null)) {
+		// Include Off screen in Animation folder only when wallpaper meshes were detected
+		if (Object.keys(wallpaperMeshes).some(key => wallpaperMeshes[key] !== null)) {
 
 			params.animationScreen = (currentWallpaper === 'off_screen' || currentWallpaper === 'Off screen') ? 'Off screen' : 'On';
 			animationFolder.add(params, 'animationScreen', ['On', 'Off screen']).name('Screen').onChange(async (value) => {
@@ -517,8 +518,8 @@ function buildGui() {
 	floorFolder.add(params, 'floorOpacity', 0, 1).onChange(onParamsChange);
 	floorFolder.close();
 
-	// Screen upload controls
-	if (screenMesh || Object.keys(wallpaperMeshes).some(key => wallpaperMeshes[key] !== null)) {
+	// Screen controls: only show when wallpaper meshes were detected
+	if (Object.keys(wallpaperMeshes).some(key => wallpaperMeshes[key] !== null)) {
 
 		const screenFolder = gui.addFolder('Screen');
 
