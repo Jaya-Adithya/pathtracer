@@ -7,6 +7,7 @@ import {
 	DoubleSide,
 	Mesh,
 	MeshStandardMaterial,
+	MeshBasicMaterial,
 	PlaneGeometry,
 	MeshPhysicalMaterial,
 	Scene,
@@ -15,12 +16,16 @@ import {
 	WebGLRenderer,
 	EquirectangularReflectionMapping,
 	Texture,
+	TextureLoader,
 	Color,
 	Vector3,
+	MathUtils,
 	SRGBColorSpace,
 	LinearMipmapLinearFilter,
 	LinearFilter,
 	AnimationMixer,
+	ClampToEdgeWrapping,
+	Group,
 } from 'three';
 import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js';
 import { HDRLoader } from 'three/examples/jsm/loaders/HDRLoader.js';
@@ -124,6 +129,10 @@ const params = {
 	screenWallpaper: 'blank_screen', // Selected wallpaper
 	screenSaturation: 1, // Predefined wallpapers: 1; custom wallpaper defaults to 0.9 when selected (0 = grayscale, 1 = normal, 2 = oversaturated)
 
+	// Background image (rendered as emissive plane inside canvas)
+	backgroundImageEnabled: false,
+	backgroundImageEmissive: 4.5, // Emissive intensity for background image (0 = no light, 10 = very bright)
+
 	// Animation frame control (like GLBViewer: 0–150 frames at 30fps)
 	animationFrame: 35,
 	// Screen on/off in Animation folder (On | Off screen)
@@ -143,6 +152,14 @@ let uploadedImage = null; // ✅ NEW: Store original image for brightness/satura
 let wallpaperMeshes = {}; // Store all wallpaper meshes: { 'blank_screen': mesh, 'blue_bloom': mesh, etc. }
 let currentWallpaper = 'blank_screen'; // Current selected wallpaper
 let imageRenderModal = null; // Image render modal instance
+
+// Background image state (rendered as emissive plane inside canvas)
+let backgroundPlane = null; // The plane mesh behind the model
+let backgroundTexture = null; // The texture for background image
+let backgroundImageSrc = null; // The image source URL (data URL)
+let backgroundImageOriginal = null; // The original Image element for reprocessing
+let backgroundImageNaturalWidth = 0;
+let backgroundImageNaturalHeight = 0;
 let animationMixer = null;
 let mainAnimAction = null;
 let mainAnimClip = null;
@@ -150,6 +167,7 @@ const ANIMATION_FRAME_RATE = 30;
 const ANIMATION_MAX_FRAME = 150;
 
 const orthoWidth = 2;
+let contentGroup = null;
 
 init();
 
@@ -211,9 +229,24 @@ async function init() {
 
 	});
 
+	// Background-mode interactions (rotate/zoom model, keep wallpaper fixed)
+	renderer.domElement.addEventListener('mousedown', startBackgroundDrag);
+	renderer.domElement.addEventListener('mousemove', moveBackgroundDrag);
+	renderer.domElement.addEventListener('mouseup', () => endBackgroundDrag().catch(() => { }));
+	renderer.domElement.addEventListener('mouseleave', () => endBackgroundDrag().catch(() => { }));
+	renderer.domElement.addEventListener('wheel', onBackgroundWheel, { passive: false });
+
 	// scene
 	scene = new Scene();
 	scene.background = gradientMap;
+	// Add cameras to scene so camera-attached background plane is included in path tracing
+	scene.add(perspectiveCamera);
+	scene.add(orthoCamera);
+
+	// Group for model + floor so we can rotate/zoom them together when background is enabled
+	contentGroup = new Group();
+	contentGroup.name = 'contentGroup';
+	scene.add(contentGroup);
 
 	const floorTex = generateRadialFloorTexture(2048);
 	floorPlane = new Mesh(
@@ -229,7 +262,7 @@ async function init() {
 	);
 	floorPlane.scale.setScalar(5);
 	floorPlane.rotation.x = - Math.PI / 2;
-	scene.add(floorPlane);
+	contentGroup.add(floorPlane);
 
 	stats = new Stats();
 	document.body.appendChild(stats.dom);
@@ -315,6 +348,7 @@ function onParamsChange() {
 
 	if (params.transparentBackground) {
 
+		// Transparent canvas for export (background image is now rendered inside canvas as a plane)
 		scene.background = null;
 		renderer.setClearAlpha(0);
 
@@ -322,6 +356,372 @@ function onParamsChange() {
 
 	pathTracer.updateMaterials();
 	pathTracer.updateEnvironment();
+
+}
+
+// ============================================================
+// Background Image (Emissive Plane inside canvas)
+// Rendered as a plane attached to the active camera (screen-space).
+// This keeps the wallpaper fixed even when orbit/zoom happens.
+// ============================================================
+
+const BACKGROUND_PLANE_DISTANCE = 2.0;
+
+let _bgDragActive = false;
+let _bgPrevEnable = null;
+let _bgPrevPause = null;
+let _bgPrevX = 0;
+let _bgPrevY = 0;
+
+function isBackgroundModeActive() {
+
+	return Boolean(params.backgroundImageEnabled && backgroundPlane && backgroundPlane.visible);
+
+}
+
+function setBackgroundControlsEnabled(enabled) {
+
+	// When background is enabled we disable orbit controls to prevent the perspective "card" effect.
+	controls.enabled = enabled;
+
+}
+
+function startBackgroundDrag(e) {
+
+	if (!isBackgroundModeActive() || !contentGroup) return;
+
+	_bgDragActive = true;
+	_bgPrevX = e.clientX;
+	_bgPrevY = e.clientY;
+
+	// Pause path tracing and show raster preview during interaction
+	_bgPrevEnable = params.enable;
+	_bgPrevPause = params.pause;
+	params.enable = false;
+	params.pause = true;
+	setBackgroundControlsEnabled(false);
+
+}
+
+function moveBackgroundDrag(e) {
+
+	if (!_bgDragActive || !contentGroup) return;
+
+	const dx = e.clientX - _bgPrevX;
+	const dy = e.clientY - _bgPrevY;
+
+	const rotSpeed = 0.005;
+	contentGroup.rotation.y += dx * rotSpeed;
+	contentGroup.rotation.x += dy * rotSpeed;
+	contentGroup.rotation.x = Math.max(- Math.PI / 2, Math.min(Math.PI / 2, contentGroup.rotation.x));
+
+	_bgPrevX = e.clientX;
+	_bgPrevY = e.clientY;
+
+}
+
+async function endBackgroundDrag() {
+
+	if (!_bgDragActive) return;
+	_bgDragActive = false;
+
+	// Restore tracing settings
+	params.enable = _bgPrevEnable ?? params.enable;
+	params.pause = _bgPrevPause ?? params.pause;
+	setBackgroundControlsEnabled(true);
+
+	// Rebuild path tracer scene because contentGroup transforms changed
+	scene.updateMatrixWorld(true);
+	await pathTracer.setSceneAsync(scene, activeCamera);
+	pathTracer.reset();
+
+}
+
+function onBackgroundWheel(e) {
+
+	if (!isBackgroundModeActive() || !contentGroup) return;
+
+	e.preventDefault();
+
+	// Zoom model by scaling contentGroup (keeps wallpaper fixed)
+	const delta = Math.sign(e.deltaY);
+	const factor = delta > 0 ? 0.95 : 1.05;
+	const next = MathUtils.clamp(contentGroup.scale.x * factor, 0.25, 4.0);
+	contentGroup.scale.setScalar(next);
+
+	// Pause path tracing while zooming
+	params.enable = false;
+	params.pause = true;
+
+	// Debounced rebuild (use a microtask-ish timeout)
+	clearTimeout(onBackgroundWheel._t);
+	onBackgroundWheel._t = setTimeout(() => {
+
+		endBackgroundDrag().catch(() => { });
+
+	}, 150);
+
+}
+
+function createBackgroundPlane() {
+
+	// Create a plane attached to the active camera (screen-space background)
+	if (backgroundPlane) return;
+
+	const geometry = new PlaneGeometry(1, 1);
+	const material = new MeshStandardMaterial({
+		color: 0xffffff,
+		emissive: 0xffffff,
+		emissiveIntensity: params.backgroundImageEmissive,
+		roughness: 1,
+		metalness: 0,
+		side: DoubleSide,
+	});
+
+	backgroundPlane = new Mesh(geometry, material);
+	backgroundPlane.name = 'backgroundImagePlane';
+	backgroundPlane.position.set(0, 0, - BACKGROUND_PLANE_DISTANCE);
+	backgroundPlane.visible = false; // Hidden until image is uploaded
+	// Attach to current camera so it stays fixed on screen
+	activeCamera.add(backgroundPlane);
+
+	console.log('✅ Background plane created');
+
+}
+
+function updateBackgroundPlaneTransform() {
+
+	if (!backgroundPlane || !activeCamera) return;
+
+	// Ensure it's parented to the current camera
+	if (backgroundPlane.parent !== activeCamera) {
+
+		if (backgroundPlane.parent) backgroundPlane.parent.remove(backgroundPlane);
+		activeCamera.add(backgroundPlane);
+
+	}
+
+	// Keep the plane behind the traced content (behind the controls target)
+	const distToTarget = controls?.target ? activeCamera.position.distanceTo(controls.target) : BACKGROUND_PLANE_DISTANCE;
+	const planeDist = Math.max(distToTarget + 0.1, activeCamera.near + 0.1, BACKGROUND_PLANE_DISTANCE);
+
+	backgroundPlane.position.set(0, 0, - planeDist);
+	backgroundPlane.rotation.set(0, 0, 0);
+
+	// Scale plane to exactly fill the view frustum at planeDist
+	let viewW = 1;
+	let viewH = 1;
+
+	if (activeCamera.isPerspectiveCamera) {
+
+		const vFov = MathUtils.degToRad(activeCamera.fov);
+		viewH = 2 * planeDist * Math.tan(vFov / 2);
+		viewW = viewH * activeCamera.aspect;
+
+	} else if (activeCamera.isOrthographicCamera) {
+
+		viewW = activeCamera.right - activeCamera.left;
+		viewH = activeCamera.top - activeCamera.bottom;
+
+	}
+
+	backgroundPlane.scale.set(viewW, viewH, 1);
+
+}
+
+function updateBackgroundTextureUVFit() {
+
+	if (!backgroundTexture || backgroundImageNaturalWidth <= 0 || backgroundImageNaturalHeight <= 0 || !activeCamera) return;
+
+	const imageAspect = backgroundImageNaturalWidth / backgroundImageNaturalHeight;
+	const viewAspect = activeCamera.isPerspectiveCamera
+		? activeCamera.aspect
+		: ((activeCamera.right - activeCamera.left) / (activeCamera.top - activeCamera.bottom));
+
+	// "Contain" fit: show whole image without stretching.
+	// Use texture.repeat/offset to letterbox in UV space.
+	let repeatX = 1;
+	let repeatY = 1;
+	let offsetX = 0;
+	let offsetY = 0;
+
+	if (imageAspect > viewAspect) {
+
+		// image is wider than view -> fit width, add top/bottom bars
+		repeatY = viewAspect / imageAspect;
+		offsetY = (1 - repeatY) / 2;
+
+	} else {
+
+		// image is taller than view -> fit height, add left/right bars
+		repeatX = imageAspect / viewAspect;
+		offsetX = (1 - repeatX) / 2;
+
+	}
+
+	backgroundTexture.wrapS = ClampToEdgeWrapping;
+	backgroundTexture.wrapT = ClampToEdgeWrapping;
+	backgroundTexture.repeat.set(repeatX, repeatY);
+	backgroundTexture.offset.set(offsetX, offsetY);
+	backgroundTexture.needsUpdate = true;
+
+}
+
+function updateBackgroundPlaneTexture(img) {
+
+	if (!backgroundPlane) {
+
+		createBackgroundPlane();
+
+	}
+
+	// ✅ NEW: Apply brightness to the image before creating texture
+	// Using params.backgroundImageEmissive as the brightness value (0-10)
+	console.log(`🔄 Updating background texture with brightness: ${params.backgroundImageEmissive}`);
+
+	const processedCanvas = applyBrightnessSaturationToImage(
+		img,
+		params.backgroundImageEmissive, // Use as direct brightness multiplier (0-10)
+		1.0 // Default saturation (1.0)
+	);
+
+	// Create texture from processed image
+	const texture = new Texture(processedCanvas);
+
+	// ✅ FIX: Match Custom Wallpaper settings for consistency
+	// - flipY: false (images loaded via Image() are naturally upright, texture default needs control)
+	// - sRGB: Correct color interpretation
+	// - Anisotropy: Better oblique viewing
+	texture.flipY = false;
+	texture.colorSpace = SRGBColorSpace;
+	texture.generateMipmaps = true;
+	texture.minFilter = LinearMipmapLinearFilter;
+	texture.magFilter = LinearFilter;
+	texture.anisotropy = 16;
+	texture.needsUpdate = true;
+
+	// Dispose old texture
+	if (backgroundTexture) {
+
+		backgroundTexture.dispose();
+
+	}
+
+	backgroundTexture = texture;
+
+	// Update material
+	const material = backgroundPlane.material;
+	material.map = texture;
+	material.emissiveMap = texture;
+	material.emissive = new Color(0xffffff);
+	// ✅ Fixed to 1.0: Brightness is now baked into the texture pixels
+	// This ensures consistency with custom wallpaper and path tracer light accumulation
+	material.emissiveIntensity = 1.0;
+	material.roughness = 1.0;
+	material.metalness = 0.0;
+	material.needsUpdate = true;
+
+	updateBackgroundPlaneTransform();
+	updateBackgroundTextureUVFit();
+
+	// Show the plane
+	backgroundPlane.visible = true;
+
+	// Update path tracer
+	pathTracer.updateMaterials();
+	pathTracer.reset();
+
+	console.log(`✅ Background plane texture updated (brightness baked: ${params.backgroundImageEmissive})`);
+
+}
+
+async function updateBackgroundEmissive() {
+
+	if (!backgroundPlane || !backgroundImageOriginal) return;
+
+	// Re-process the texture to bake in the new brightness
+	// This replaces the old logic of just changing emissiveIntensity
+	updateBackgroundPlaneTexture(backgroundImageOriginal);
+
+}
+
+async function showBackgroundPlane() {
+
+	if (backgroundPlane && backgroundTexture) {
+
+		backgroundPlane.visible = true;
+		scene.updateMatrixWorld(true);
+		await pathTracer.setSceneAsync(scene, activeCamera);
+		pathTracer.updateMaterials();
+		pathTracer.reset();
+
+	}
+
+}
+
+async function hideBackgroundPlane() {
+
+	if (backgroundPlane) {
+
+		backgroundPlane.visible = false;
+		scene.updateMatrixWorld(true);
+		await pathTracer.setSceneAsync(scene, activeCamera);
+		pathTracer.updateMaterials();
+		pathTracer.reset();
+
+	}
+
+}
+
+function handleBackgroundImageUpload(file) {
+
+	if (!file || !file.type.startsWith('image/')) {
+
+		alert('Please upload an image file');
+		return;
+
+	}
+
+	const reader = new FileReader();
+	reader.onload = (e) => {
+
+		const img = new Image();
+		img.onload = async () => {
+
+			backgroundImageSrc = e.target.result;
+			backgroundImageNaturalWidth = img.width;
+			backgroundImageNaturalHeight = img.height;
+			backgroundImageOriginal = img; // Store for reprocessing
+
+			// Enable background
+			params.backgroundImageEnabled = true;
+
+			// Create/update background plane with emissive texture
+			createBackgroundPlane();
+			updateBackgroundPlaneTexture(img);
+			updateBackgroundPlaneTransform();
+			updateBackgroundTextureUVFit();
+
+			// Rebuild path tracer scene so it includes the background plane (otherwise it stays black)
+			scene.updateMatrixWorld(true);
+			await pathTracer.setSceneAsync(scene, activeCamera);
+			pathTracer.reset();
+
+			// Expose to window for ImageRenderModal
+			window.backgroundImageSrc = backgroundImageSrc;
+			window.backgroundImageNaturalWidth = backgroundImageNaturalWidth;
+			window.backgroundImageNaturalHeight = backgroundImageNaturalHeight;
+
+			// Rebuild GUI
+			buildGui();
+
+			console.log(`✅ Background image loaded: ${img.width}x${img.height}`);
+
+		};
+		img.src = e.target.result;
+
+	};
+	reader.readAsDataURL(file);
 
 }
 
@@ -370,6 +770,8 @@ function onResize() {
 	orthoCamera.updateProjectionMatrix();
 
 	pathTracer.updateCamera();
+	updateBackgroundPlaneTransform();
+	updateBackgroundTextureUVFit();
 
 }
 
@@ -510,6 +912,91 @@ function buildGui() {
 		else document.body.classList.remove('checkerboard');
 
 	});
+
+	// Background image upload (emissive plane inside canvas)
+	backgroundFolder.add({
+		uploadBackgroundImage: () => {
+
+			const fileInput = document.createElement('input');
+			fileInput.type = 'file';
+			fileInput.accept = 'image/*';
+			fileInput.style.display = 'none';
+			fileInput.addEventListener('change', (e) => {
+
+				if (e.target.files[0]) {
+
+					handleBackgroundImageUpload(e.target.files[0]);
+
+				}
+
+			});
+			fileInput.click();
+
+		}
+	}, 'uploadBackgroundImage').name('Upload Background');
+
+	backgroundFolder.add(params, 'backgroundImageEnabled').name('Show Background Image').onChange((v) => {
+
+		if (v && backgroundImageSrc) {
+
+			showBackgroundPlane();
+
+		} else {
+
+			hideBackgroundPlane();
+
+		}
+
+	});
+
+	// Emissive intensity slider for background image
+	backgroundFolder.add(params, 'backgroundImageEmissive', 0, 10, 0.1).name('BG Emissive').onChange(() => {
+
+		updateBackgroundEmissive();
+
+	});
+
+	backgroundFolder.add({
+		removeBackgroundImage: async () => {
+
+			backgroundImageSrc = null;
+			backgroundImageNaturalWidth = 0;
+			backgroundImageNaturalHeight = 0;
+			backgroundImageOriginal = null;
+			params.backgroundImageEnabled = false;
+
+			// Clear window references
+			window.backgroundImageSrc = null;
+			window.backgroundImageNaturalWidth = 0;
+			window.backgroundImageNaturalHeight = 0;
+
+			// Remove plane from scene
+			if (backgroundPlane) {
+
+				backgroundPlane.visible = false;
+				scene.remove(backgroundPlane);
+				if (backgroundPlane.material) backgroundPlane.material.dispose();
+				if (backgroundPlane.geometry) backgroundPlane.geometry.dispose();
+				backgroundPlane = null;
+
+			}
+
+			if (backgroundTexture) {
+
+				backgroundTexture.dispose();
+				backgroundTexture = null;
+
+			}
+
+			// Rebuild path tracer without background plane and restore canvas size
+			scene.updateMatrixWorld(true);
+			await pathTracer.setSceneAsync(scene, activeCamera);
+			pathTracer.reset();
+			onResize(); // Restore canvas to full window dimensions
+			buildGui();
+
+		}
+	}, 'removeBackgroundImage').name('Remove Background');
 
 	const floorFolder = gui.addFolder('floor');
 	floorFolder.addColor(params, 'floorColor').onChange(onParamsChange);
@@ -681,6 +1168,8 @@ function updateCameraProjection(cameraProjection) {
 	controls.update();
 
 	pathTracer.setCamera(activeCamera);
+	updateBackgroundPlaneTransform();
+	updateBackgroundTextureUVFit();
 
 	// Update modal camera reference
 	if (imageRenderModal) {
@@ -1783,7 +2272,7 @@ async function updateModel() {
 
 		});
 
-		scene.remove(model);
+		contentGroup?.remove(model);
 		model = null;
 
 	}
@@ -1877,7 +2366,7 @@ async function updateModel() {
 	box.setFromObject(model);
 	floorPlane.position.y = box.min.y;
 
-	scene.add(model);
+	contentGroup.add(model);
 
 	// 1. Find all wallpaper meshes BEFORE building the path tracer scene
 	wallpaperMeshes = findAllWallpaperMeshes(model);

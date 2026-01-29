@@ -37,6 +37,7 @@ export class ImageRenderModal {
 			aspectRatio: '16:9',
 			format: 'PNG',
 			targetSamples: 1000,
+			backgroundMode: 'without',
 			fileName: 'render'
 		};
 
@@ -111,6 +112,13 @@ export class ImageRenderModal {
 							</div>
 						</div>
 						<div class="form-group">
+							<label for="backgroundMode">Background:</label>
+							<select id="backgroundMode" class="form-control">
+								<option value="without" selected>Without Background</option>
+								<option value="with">With Background</option>
+							</select>
+						</div>
+						<div class="form-group">
 							<label for="fileName">File Name:</label>
 							<input type="text" id="fileName" value="render" class="form-control">
 						</div>
@@ -162,7 +170,7 @@ export class ImageRenderModal {
 		} );
 
 		// Settings changes
-		[ 'resolution', 'aspectRatio', 'format', 'fileName' ].forEach( id => {
+		[ 'resolution', 'aspectRatio', 'format', 'backgroundMode', 'fileName' ].forEach( id => {
 
 			document.getElementById( id ).addEventListener( 'change', ( e ) => {
 
@@ -237,9 +245,50 @@ export class ImageRenderModal {
 
 		try {
 
+			// Background mode
+			const shouldCaptureBackground = this.settings.backgroundMode === 'with';
+			const bgImageSrc = window.backgroundImageSrc || null;
+			const bgImageW = window.backgroundImageNaturalWidth || 0;
+			const bgImageH = window.backgroundImageNaturalHeight || 0;
+
 			// Get target dimensions
 			const res = this.resolutions[ this.settings.resolution ];
 			let [ width, height ] = res[ this.settings.aspectRatio ];
+
+			// If "with background" and we have image dimensions, preserve background aspect ratio
+			if ( shouldCaptureBackground && bgImageSrc && bgImageW > 0 && bgImageH > 0 ) {
+
+				const bgAspect = bgImageW / bgImageH;
+				const baseAspect = width / height;
+
+				if ( bgAspect > baseAspect ) {
+
+					height = Math.round( width / bgAspect );
+
+				} else {
+
+					width = Math.round( height * bgAspect );
+
+				}
+
+				console.log( `🎨 [Render] Adjusted to background aspect ratio: ${width}x${height} (image: ${bgImageW}x${bgImageH})` );
+
+			}
+
+			// For background capture, ensure scene background is null (transparent)
+			// so we can composite the background image behind the render
+			let originalBackground = null;
+			let originalClearAlpha = 1;
+			if ( shouldCaptureBackground && bgImageSrc ) {
+
+				originalBackground = this.scene.background;
+				originalClearAlpha = this.renderer.getClearAlpha();
+				this.scene.background = null;
+				this.renderer.setClearAlpha( 0 );
+				this.pathTracer.updateEnvironment();
+				console.log( `🎨 [Render] Set transparent background for compositing` );
+
+			}
 
 			// CRITICAL: Clamp resolution to GPU limits BEFORE any operations
 			const originalWidth = width;
@@ -530,6 +579,15 @@ export class ImageRenderModal {
 
 			}
 
+			// If "with background", composite the background image behind the render
+			if ( shouldCaptureBackground && bgImageSrc ) {
+
+				progressText.textContent = 'Compositing background image...';
+				imageData = await this.compositeWithBackground( imageData, bgImageSrc, canvas.width, canvas.height );
+				console.log( `🎨 [Render] Composited background image` );
+
+			}
+
 			// Download image
 			this.downloadImage( imageData, this.settings.fileName, this.settings.format );
 
@@ -540,6 +598,15 @@ export class ImageRenderModal {
 			this.pathTracer.pausePathTracing = originalPausePathTracing;
 			this.pathTracer.renderToCanvas = originalRenderToCanvas;
 			this.pathTracer.renderScale = originalRenderScale; // Restore original renderScale
+
+			// Restore background/environment
+			if ( shouldCaptureBackground && bgImageSrc && originalBackground !== null ) {
+
+				this.scene.background = originalBackground;
+				this.renderer.setClearAlpha( originalClearAlpha );
+				this.pathTracer.updateEnvironment();
+
+			}
 
 			setTimeout( () => {
 
@@ -553,6 +620,16 @@ export class ImageRenderModal {
 			console.error( 'Render error:', error );
 			progressText.textContent = `Error: ${error.message}`;
 			alert( `Render failed: ${error.message}` );
+
+			// Restore background/environment on error
+			if ( shouldCaptureBackground && bgImageSrc && originalBackground !== null ) {
+
+				this.scene.background = originalBackground;
+				this.renderer.setClearAlpha( originalClearAlpha );
+				this.pathTracer.updateEnvironment();
+
+			}
+
 			this.restoreRenderer();
 
 		} finally {
@@ -661,6 +738,83 @@ export class ImageRenderModal {
 		}
 
 		throw new Error( `Unsupported format: ${format}` );
+
+	}
+
+	/**
+	 * Composite a background image behind the path-traced render.
+	 * The render has transparent background; we draw the bg image first,
+	 * then the render on top, preserving alpha compositing.
+	 * Returns a data URL of the composited image.
+	 */
+	async compositeWithBackground( renderDataUrl, bgImageSrc, width, height ) {
+
+		return new Promise( ( resolve, reject ) => {
+
+			const bgImg = new Image();
+			bgImg.onload = () => {
+
+				const tempCanvas = document.createElement( 'canvas' );
+				tempCanvas.width = width;
+				tempCanvas.height = height;
+				const ctx = tempCanvas.getContext( '2d' );
+
+				// Draw background image — fill canvas using "contain" logic (same as CSS object-fit: contain)
+				const bgAspect = bgImg.width / bgImg.height;
+				const canvasAspect = width / height;
+				let drawW, drawH, drawX, drawY;
+
+				if ( bgAspect > canvasAspect ) {
+
+					// Image is wider — fit to width
+					drawW = width;
+					drawH = width / bgAspect;
+					drawX = 0;
+					drawY = ( height - drawH ) / 2;
+
+				} else {
+
+					// Image is taller — fit to height
+					drawH = height;
+					drawW = height * bgAspect;
+					drawX = ( width - drawW ) / 2;
+					drawY = 0;
+
+				}
+
+				// Black background fill for letterbox areas
+				ctx.fillStyle = '#000000';
+				ctx.fillRect( 0, 0, width, height );
+
+				// Draw background image
+				ctx.drawImage( bgImg, drawX, drawY, drawW, drawH );
+
+				// Draw the path-traced render on top (with alpha compositing)
+				const renderImg = new Image();
+				renderImg.onload = () => {
+
+					ctx.drawImage( renderImg, 0, 0, width, height );
+
+					const format = this.settings.format.toUpperCase();
+					if ( format === 'JPG' || format === 'JPEG' ) {
+
+						resolve( tempCanvas.toDataURL( 'image/jpeg', 0.95 ) );
+
+					} else {
+
+						resolve( tempCanvas.toDataURL( 'image/png', 1.0 ) );
+
+					}
+
+				};
+				renderImg.onerror = reject;
+				renderImg.src = renderDataUrl;
+
+			};
+			bgImg.onerror = reject;
+			bgImg.src = bgImageSrc;
+
+		} );
 
 	}
 
