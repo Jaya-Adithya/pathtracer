@@ -540,7 +540,7 @@ function updateBackgroundPlaneTransform() {
 	backgroundPlane.position.set(0, 0, - planeDist);
 	backgroundPlane.rotation.set(0, 0, 0);
 
-	// Scale plane to exactly fill the view frustum at planeDist
+	// View frustum size at planeDist (full canvas in world units)
 	let viewW = 1;
 	let viewH = 1;
 
@@ -557,44 +557,42 @@ function updateBackgroundPlaneTransform() {
 
 	}
 
-	backgroundPlane.scale.set(viewW, viewH, 1);
+	// Size plane to exact image dimensions (aspect ratio): contain inside view, no stretch
+	let planeW = viewW;
+	let planeH = viewH;
+	if (backgroundImageNaturalWidth > 0 && backgroundImageNaturalHeight > 0) {
+
+		const imageAspect = backgroundImageNaturalWidth / backgroundImageNaturalHeight;
+		const viewAspect = viewW / viewH;
+		if (imageAspect > viewAspect) {
+
+			// Image wider than view → fit width, letterbox top/bottom
+			planeH = viewW / imageAspect;
+
+		} else {
+
+			// Image taller than view → fit height, letterbox left/right
+			planeW = viewH * imageAspect;
+
+		}
+
+	}
+
+	backgroundPlane.scale.set(planeW, planeH, 1);
 
 }
 
 function updateBackgroundTextureUVFit() {
 
-	if (!backgroundTexture || backgroundImageNaturalWidth <= 0 || backgroundImageNaturalHeight <= 0 || !activeCamera) return;
+	if (!backgroundTexture || !activeCamera) return;
 
-	const imageAspect = backgroundImageNaturalWidth / backgroundImageNaturalHeight;
-	const viewAspect = activeCamera.isPerspectiveCamera
-		? activeCamera.aspect
-		: ((activeCamera.right - activeCamera.left) / (activeCamera.top - activeCamera.bottom));
-
-	// "Contain" fit: show whole image without stretching.
-	// Use texture.repeat/offset to letterbox in UV space.
-	let repeatX = 1;
-	let repeatY = 1;
-	let offsetX = 0;
-	let offsetY = 0;
-
-	if (imageAspect > viewAspect) {
-
-		// image is wider than view -> fit width, add top/bottom bars
-		repeatY = viewAspect / imageAspect;
-		offsetY = (1 - repeatY) / 2;
-
-	} else {
-
-		// image is taller than view -> fit height, add left/right bars
-		repeatX = imageAspect / viewAspect;
-		offsetX = (1 - repeatX) / 2;
-
-	}
-
+	// Plane is now sized to exact image aspect (updateBackgroundPlaneTransform), so show
+	// full texture 1:1 on the plane — no repeat/offset letterbox, no stretched edges.
+	// V flip so image top = screen top (PlaneGeometry convention).
 	backgroundTexture.wrapS = ClampToEdgeWrapping;
 	backgroundTexture.wrapT = ClampToEdgeWrapping;
-	backgroundTexture.repeat.set(repeatX, repeatY);
-	backgroundTexture.offset.set(offsetX, offsetY);
+	backgroundTexture.repeat.set(1, - 1);
+	backgroundTexture.offset.set(0, 1);
 	backgroundTexture.needsUpdate = true;
 
 }
