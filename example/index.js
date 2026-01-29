@@ -1456,6 +1456,9 @@ async function updateScreenTextureWithSettings() {
 		// Keep emissiveIntensity at 1.0 since brightness is now baked into the texture
 		material.emissiveIntensity = 1.0;
 		material.emissive = new Color(0xffffff);
+		// Match predefined wallpapers: glossy screen look (low roughness, no metalness)
+		material.roughness = 1;
+		material.metalness = 1;
 		material.needsUpdate = true;
 
 	});
@@ -1574,11 +1577,15 @@ async function handleImageUpload(file) {
 					// ✅ FIX: Set emissiveIntensity to 1.0 since brightness is baked into texture
 					material.emissiveIntensity = 1.0;
 					material.emissive = new Color(0xffffff); // White base
+					// Match predefined wallpapers: glossy screen look (low roughness, no metalness)
+					material.roughness = 1;
+					material.metalness = 1;
 					material.needsUpdate = true;
 
 					console.log(`      ✅ Applied new emissiveMap`);
 					console.log(`      ✅ Set emissiveIntensity to: 1.0 (brightness baked into texture)`);
 					console.log(`      ✅ Set emissive color to white`);
+					console.log(`      ✅ Set roughness=0, metalness=0 for glossy screen`);
 					console.log(`      ✅ Set needsUpdate = true`);
 
 				});
