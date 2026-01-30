@@ -916,8 +916,41 @@ export class ImageRenderModal {
 
 			}
 
+			// Resize path tracer back to original size (same logic as when starting render)
+			const drawW = this.originalSize.width * this.originalPixelRatio;
+			const drawH = this.originalSize.height * this.originalPixelRatio;
+			const w = Math.floor( this.originalSettings.renderScale * drawW );
+			const h = Math.floor( this.originalSettings.renderScale * drawH );
+			if ( this.pathTracer._pathTracer && typeof this.pathTracer._pathTracer.setSize === 'function' ) {
+
+				this.pathTracer._pathTracer.setSize( w, h );
+				const lowResScale = this.pathTracer.lowResScale != null ? this.pathTracer.lowResScale : 0.25;
+				if ( this.pathTracer._lowResPathTracer && typeof this.pathTracer._lowResPathTracer.setSize === 'function' ) {
+
+					this.pathTracer._lowResPathTracer.setSize( Math.floor( w * lowResScale ), Math.floor( h * lowResScale ) );
+
+				}
+
+			} else if ( typeof this.pathTracer.setSize === 'function' ) {
+
+				this.pathTracer.setSize( w, h );
+
+			} else if ( typeof this.pathTracer.resize === 'function' ) {
+
+				this.pathTracer.resize( w, h );
+
+			}
+
 			// Update path tracer camera
 			this.pathTracer.updateCamera();
+
+		}
+
+		// Re-sync path tracer with scene (background, env map, clear alpha) so the live canvas
+		// shows the correct background/wallpaper again after render
+		if ( typeof this.pathTracer.updateEnvironment === 'function' ) {
+
+			this.pathTracer.updateEnvironment();
 
 		}
 

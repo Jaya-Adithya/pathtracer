@@ -307,6 +307,7 @@ export class WebGLPathTracer {
 
 		// update scene environment
 		material.environmentIntensity = scene.environment !== null ? ( scene.environmentIntensity ?? 1 ) : 0;
+		material.environmentSaturation = scene.userData?.environmentSaturation ?? 1;
 		material.environmentRotation.makeRotationFromEuler( scene.environmentRotation ).invert();
 		if ( this._previousEnvironment !== scene.environment ) {
 

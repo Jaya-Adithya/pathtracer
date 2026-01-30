@@ -99,6 +99,7 @@ export class PhysicalPathTracingMaterial extends MaterialBase {
 				} ).texture },
 				environmentIntensity: { value: 1.0 },
 				environmentRotation: { value: new Matrix4() },
+				environmentSaturation: { value: 1.0 },
 				envMapInfo: { value: new EquirectHdrInfoUniform() },
 
 				// background uniforms
@@ -196,6 +197,14 @@ export class PhysicalPathTracingMaterial extends MaterialBase {
 				uniform EquirectHdrInfo envMapInfo;
 				uniform mat4 environmentRotation;
 				uniform float environmentIntensity;
+				uniform float environmentSaturation;
+
+				vec3 applyEnvSaturation( vec3 c ) {
+
+					float g = dot( c, vec3( 0.2126, 0.7152, 0.0722 ) );
+					return mix( vec3( g ), c, environmentSaturation );
+
+				}
 
 				// lighting
 				uniform sampler2DArray iesProfiles;
@@ -276,12 +285,12 @@ export class PhysicalPathTracingMaterial extends MaterialBase {
 					#if FEATURE_BACKGROUND_MAP
 
 					sampleDir = normalize( mat3( backgroundRotation ) * direction + sampleDir );
-					return backgroundIntensity * sampleEquirectColor( backgroundMap, sampleDir );
+					return applyEnvSaturation( backgroundIntensity * sampleEquirectColor( backgroundMap, sampleDir ) );
 
 					#else
 
 					sampleDir = normalize( envRotation3x3 * direction + sampleDir );
-					return environmentIntensity * sampleEquirectColor( envMapInfo.map, sampleDir );
+					return applyEnvSaturation( environmentIntensity * sampleEquirectColor( envMapInfo.map, sampleDir ) );
 
 					#endif
 
@@ -393,13 +402,13 @@ export class PhysicalPathTracingMaterial extends MaterialBase {
 
 								// and weight the contribution
 								float misWeight = misHeuristic( scatterRec.pdf, envPdf );
-								gl_FragColor.rgb += environmentIntensity * envColor * state.throughputColor * misWeight;
+								gl_FragColor.rgb += environmentIntensity * applyEnvSaturation( envColor ) * state.throughputColor * misWeight;
 
 								#else
 
 								gl_FragColor.rgb +=
 									environmentIntensity *
-									sampleEquirectColor( envMapInfo.map, envRotation3x3 * ray.direction ) *
+									applyEnvSaturation( sampleEquirectColor( envMapInfo.map, envRotation3x3 * ray.direction ) ) *
 									state.throughputColor;
 
 								#endif

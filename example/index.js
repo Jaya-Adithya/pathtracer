@@ -108,8 +108,10 @@ const params = {
 
 	environmentIntensity: 1.0,
 	environmentRotation: 0,
+	environmentSaturation: 1.0,
 
 	cameraProjection: 'Perspective',
+	focalLength: 35,
 
 	backgroundType: 'Gradient',
 	bgGradientTop: '#111111',
@@ -309,6 +311,14 @@ async function init() {
 	imageRenderModal = new ImageRenderModal(pathTracer, renderer, scene, activeCamera);
 
 	updateCameraProjection(params.cameraProjection);
+	scene.userData.environmentSaturation = params.environmentSaturation;
+	if ( params.focalLength != null && params.focalLength > 0 ) {
+
+		const filmHeight = 24;
+		perspectiveCamera.fov = MathUtils.radToDeg( 2 * Math.atan( ( filmHeight / 2 ) / params.focalLength ) );
+		perspectiveCamera.updateProjectionMatrix();
+
+	}
 	onHashChange();
 	updateEnvMap();
 	onResize();
@@ -366,7 +376,17 @@ function onParamsChange() {
 
 	scene.environmentIntensity = params.environmentIntensity;
 	scene.environmentRotation.y = params.environmentRotation;
+	scene.userData.environmentSaturation = params.environmentSaturation;
 	scene.backgroundBlurriness = params.backgroundBlur;
+
+	if ( params.focalLength != null && params.focalLength > 0 ) {
+
+		const filmHeight = 24;
+		perspectiveCamera.fov = MathUtils.radToDeg( 2 * Math.atan( ( filmHeight / 2 ) / params.focalLength ) );
+		perspectiveCamera.updateProjectionMatrix();
+		pathTracer.updateCamera();
+
+	}
 
 	if (params.backgroundType === 'Gradient') {
 
@@ -1028,6 +1048,7 @@ function buildGui() {
 		updateCameraProjection(v);
 
 	});
+	pathTracingFolder.add(params, 'focalLength', 15, 100, 1).onChange(onParamsChange).name('Focal length (mm)');
 	const renderImageController = pathTracingFolder.add({
 		renderImage: () => {
 
@@ -1058,6 +1079,7 @@ function buildGui() {
 	environmentFolder.add(params, 'envMap', envMaps).name('map').onChange(updateEnvMap);
 	environmentFolder.add(params, 'environmentIntensity', 0.0, 10.0).onChange(onParamsChange).name('intensity');
 	environmentFolder.add(params, 'environmentRotation', 0, 2 * Math.PI).onChange(onParamsChange);
+	environmentFolder.add(params, 'environmentSaturation', 0, 2).onChange(onParamsChange).name('HDRI saturation');
 
 	// Use background image as environment lighting (PMREM conversion)
 	environmentFolder.add(params, 'backgroundAsHDRI').name('BG Image as HDRI').onChange(() => {

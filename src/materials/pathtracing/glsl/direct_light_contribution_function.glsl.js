@@ -80,7 +80,7 @@ export const direct_light_contribution_function = /*glsl*/`
 					// weight the direct light contribution
 					envPdf /= lightsDenom;
 					float misWeight = misHeuristic( envPdf, envMaterialPdf );
-					result = attenuatedColor * environmentIntensity * envColor * state.throughputColor * sampleColor * misWeight / envPdf;
+					result = attenuatedColor * environmentIntensity * applyEnvSaturation( envColor ) * state.throughputColor * sampleColor * misWeight / envPdf;
 
 				}
 
