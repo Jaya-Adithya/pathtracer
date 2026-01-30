@@ -127,6 +127,8 @@ const params = {
 	floorOpacity: 1.0,
 	floorRoughness: 0.2,
 	floorMetalness: 0.2,
+	floorTransmission: 0.0,
+	floorIOR: 1.5,
 
 	screenBrightness: 1, // Predefined wallpapers: 1; custom wallpaper defaults to 4.5 when selected
 	screenWallpaper: 'blank_screen', // Selected wallpaper
@@ -203,16 +205,27 @@ async function init() {
 	loader = new LoaderElement();
 	loader.attach(document.body);
 
-	// renderer — alpha: true so CSS background shows through when no scene.background
-	renderer = new WebGLRenderer({ antialias: true, alpha: true });
+	// renderer — alpha + premultipliedAlpha:false so CSS background shows through
+	renderer = new WebGLRenderer({ antialias: true, alpha: true, premultipliedAlpha: false });
 	renderer.toneMapping = ACESFilmicToneMapping;
-	document.body.appendChild(renderer.domElement);
 
-	// CSS background overlay behind the canvas
+	// Wrap canvas + CSS background overlay in a container (like StudioX)
+	const canvasContainer = document.createElement('div');
+	canvasContainer.id = 'canvas-container';
+	canvasContainer.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;';
+	document.body.appendChild(canvasContainer);
+
+	// CSS background overlay — behind the canvas inside the container
 	backgroundOverlay = document.createElement('img');
 	backgroundOverlay.id = 'background-overlay';
-	backgroundOverlay.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;object-fit:contain;z-index:-1;display:none;pointer-events:none;background:#000;';
-	document.body.insertBefore(backgroundOverlay, renderer.domElement);
+	backgroundOverlay.style.cssText = 'position:absolute;top:0;left:0;width:100%;height:100%;object-fit:contain;display:none;pointer-events:none;background:#000;';
+	canvasContainer.appendChild(backgroundOverlay);
+
+	// Canvas on top of the overlay (position only — renderer.setSize handles dimensions)
+	renderer.domElement.style.position = 'absolute';
+	renderer.domElement.style.top = '0';
+	renderer.domElement.style.left = '0';
+	canvasContainer.appendChild(renderer.domElement);
 
 	// path tracer
 	pathTracer = new WebGLPathTracer(renderer);
@@ -274,12 +287,14 @@ async function init() {
 	const floorTex = generateRadialFloorTexture(2048);
 	floorPlane = new Mesh(
 		new PlaneGeometry(),
-		new MeshStandardMaterial({
+		new MeshPhysicalMaterial({
 			map: floorTex,
 			transparent: true,
 			color: 0x111111,
 			roughness: 0.1,
 			metalness: 0.0,
+			transmission: 0.0,
+			ior: 1.5,
 			side: DoubleSide,
 		})
 	);
@@ -346,6 +361,8 @@ function onParamsChange() {
 	floorPlane.material.roughness = params.floorRoughness;
 	floorPlane.material.metalness = params.floorMetalness;
 	floorPlane.material.opacity = params.floorOpacity;
+	floorPlane.material.transmission = params.floorTransmission;
+	floorPlane.material.ior = params.floorIOR;
 
 	scene.environmentIntensity = params.environmentIntensity;
 	scene.environmentRotation.y = params.environmentRotation;
@@ -1154,6 +1171,8 @@ function buildGui() {
 	floorFolder.add(params, 'floorRoughness', 0, 1).onChange(onParamsChange);
 	floorFolder.add(params, 'floorMetalness', 0, 1).onChange(onParamsChange);
 	floorFolder.add(params, 'floorOpacity', 0, 1).onChange(onParamsChange);
+	floorFolder.add(params, 'floorTransmission', 0, 1).name('Floor transmission (glass)').onChange(onParamsChange);
+	floorFolder.add(params, 'floorIOR', 1.0, 2.0, 0.01).name('Floor IOR').onChange(onParamsChange);
 	floorFolder.close();
 
 	// Screen controls: only show when wallpaper meshes were detected
@@ -2625,9 +2644,11 @@ async function updateModel() {
 	loader.setPercentage(1);
 	loader.setCredits(modelInfo.credit || '');
 	params.bounces = modelInfo.bounces || 5;
-	params.floorColor = modelInfo.floorColor || '#111111';
-	params.floorRoughness = modelInfo.floorRoughness || 0.2;
-	params.floorMetalness = modelInfo.floorMetalness || 0.2;
+params.floorColor = modelInfo.floorColor || '#111111';
+			params.floorRoughness = modelInfo.floorRoughness || 0.2;
+			params.floorMetalness = modelInfo.floorMetalness || 0.2;
+			if ( modelInfo.floorTransmission !== undefined ) params.floorTransmission = modelInfo.floorTransmission;
+			if ( modelInfo.floorIOR !== undefined ) params.floorIOR = modelInfo.floorIOR;
 	params.bgGradientTop = modelInfo.gradientTop || '#111111';
 	params.bgGradientBottom = modelInfo.gradientBot || '#000000';
 

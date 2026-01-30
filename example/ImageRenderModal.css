@@ -243,6 +243,17 @@
 	color: #fff;
 }
 
+.btn-warning {
+	background: #b8860b;
+	color: #000;
+	border: 1px solid #daa520;
+}
+
+.btn-warning:hover {
+	background: #daa520;
+	color: #000;
+}
+
 /* Scrollbar */
 .modal-content::-webkit-scrollbar {
 	width: 8px;

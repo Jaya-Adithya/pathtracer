@@ -41,6 +41,9 @@ export class ImageRenderModal {
 			fileName: 'render'
 		};
 
+		// When user clicks "Stop & capture" during render, we exit the sample loop and capture at current samples
+		this.stopRequested = false;
+
 		// Resolution map
 		this.resolutions = {
 			'1K': { '16:9': [ 1920, 1080 ], '1:1': [ 1920, 1920 ], '4:3': [ 1920, 1440 ] },
@@ -131,6 +134,7 @@ export class ImageRenderModal {
 					</div>
 					<div class="modal-footer">
 						<button id="cancelBtn" class="btn btn-secondary">Cancel</button>
+						<button id="stopAndCaptureBtn" class="btn btn-warning" style="display: none;">Stop & capture</button>
 						<button id="renderBtn" class="btn btn-primary">Render</button>
 					</div>
 				</div>
@@ -166,6 +170,13 @@ export class ImageRenderModal {
 
 			this.settings.targetSamples = parseInt( e.target.value );
 			this.updateSamplesDisplay();
+
+		} );
+
+		// Stop & capture: stop sample accumulation and capture at current samples
+		document.getElementById( 'stopAndCaptureBtn' ).addEventListener( 'click', () => {
+
+			if ( this.isRendering ) this.stopRequested = true;
 
 		} );
 
@@ -234,13 +245,16 @@ export class ImageRenderModal {
 		if ( this.isRendering ) return;
 
 		this.isRendering = true;
+		this.stopRequested = false;
 		const renderBtn = document.getElementById( 'renderBtn' );
+		const stopBtn = document.getElementById( 'stopAndCaptureBtn' );
 		const progressDiv = document.getElementById( 'renderProgress' );
 		const progressFill = document.getElementById( 'progressFill' );
 		const progressText = document.getElementById( 'progressText' );
 
 		renderBtn.disabled = true;
-		renderBtn.textContent = 'Rendering...';
+		renderBtn.style.display = 'none';
+		if ( stopBtn ) stopBtn.style.display = 'inline-block';
 		progressDiv.style.display = 'block';
 
 		try {
@@ -635,8 +649,11 @@ export class ImageRenderModal {
 		} finally {
 
 			this.isRendering = false;
+			this.stopRequested = false;
 			renderBtn.disabled = false;
 			renderBtn.textContent = 'Render';
+			renderBtn.style.display = '';
+			if ( document.getElementById( 'stopAndCaptureBtn' ) ) document.getElementById( 'stopAndCaptureBtn' ).style.display = 'none';
 
 		}
 
@@ -645,8 +662,12 @@ export class ImageRenderModal {
 	cancelRender() {
 
 		this.isRendering = false;
+		this.stopRequested = false;
 		this.restoreRenderer();
 		document.getElementById( 'renderProgress' ).style.display = 'none';
+		document.getElementById( 'renderBtn' ).style.display = '';
+		const stopBtn = document.getElementById( 'stopAndCaptureBtn' );
+		if ( stopBtn ) stopBtn.style.display = 'none';
 
 	}
 
@@ -671,6 +692,16 @@ export class ImageRenderModal {
 
 				if ( ! this.isRendering ) {
 
+					resolve();
+					return;
+
+				}
+
+				// User clicked "Stop & capture": exit loop and capture at current samples
+				if ( this.stopRequested ) {
+
+					const currentSamples = Math.floor( this.pathTracer.samples );
+					progressText.textContent = `Stopped at ${currentSamples.toLocaleString()} samples — capturing...`;
 					resolve();
 					return;
 
