@@ -275,8 +275,8 @@ export class ImageRenderModal {
 
 			}
 
-			// For background capture, ensure scene background is null (transparent)
-			// so we can composite the background image behind the render
+			// For background capture: render with transparent canvas, then composite
+			// the CSS background image behind the path-traced render afterward.
 			let originalBackground = null;
 			let originalClearAlpha = 1;
 			if ( shouldCaptureBackground && bgImageSrc ) {
@@ -579,7 +579,7 @@ export class ImageRenderModal {
 
 			}
 
-			// If "with background", composite the background image behind the render
+			// Composite the CSS background image behind the transparent path-traced render
 			if ( shouldCaptureBackground && bgImageSrc ) {
 
 				progressText.textContent = 'Compositing background image...';
@@ -600,7 +600,7 @@ export class ImageRenderModal {
 			this.pathTracer.renderScale = originalRenderScale; // Restore original renderScale
 
 			// Restore background/environment
-			if ( shouldCaptureBackground && bgImageSrc && originalBackground !== null ) {
+			if ( shouldCaptureBackground && bgImageSrc ) {
 
 				this.scene.background = originalBackground;
 				this.renderer.setClearAlpha( originalClearAlpha );
@@ -622,7 +622,7 @@ export class ImageRenderModal {
 			alert( `Render failed: ${error.message}` );
 
 			// Restore background/environment on error
-			if ( shouldCaptureBackground && bgImageSrc && originalBackground !== null ) {
+			if ( shouldCaptureBackground && bgImageSrc ) {
 
 				this.scene.background = originalBackground;
 				this.renderer.setClearAlpha( originalClearAlpha );

@@ -26,6 +26,9 @@ import {
 	AnimationMixer,
 	ClampToEdgeWrapping,
 	Group,
+	DataTexture,
+	FloatType,
+	RGBAFormat,
 } from 'three';
 import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js';
 import { HDRLoader } from 'three/examples/jsm/loaders/HDRLoader.js';
@@ -133,6 +136,10 @@ const params = {
 	backgroundImageEnabled: false,
 	backgroundImageEmissive: 4.5, // Emissive intensity for background image (0 = no light, 10 = very bright)
 
+	// Background image as HDRI (converts LDR image to environment lighting via PMREM)
+	backgroundAsHDRI: false, // Toggle: use background image as environment lighting
+	backgroundHDRIIntensity: 1.0, // Intensity of the converted HDRI (independent of visual background)
+
 	// Animation frame control (like GLBViewer: 0–150 frames at 30fps)
 	animationFrame: 35,
 	// Screen on/off in Animation folder (On | Off screen)
@@ -153,13 +160,16 @@ let wallpaperMeshes = {}; // Store all wallpaper meshes: { 'blank_screen': mesh,
 let currentWallpaper = 'blank_screen'; // Current selected wallpaper
 let imageRenderModal = null; // Image render modal instance
 
-// Background image state (rendered as emissive plane inside canvas)
-let backgroundPlane = null; // The plane mesh behind the model
-let backgroundTexture = null; // The texture for background image
+// Background image state (CSS overlay behind canvas + HDRI conversion)
+let backgroundOverlay = null; // CSS <img> element behind the canvas
+let backgroundPlane = null; // Legacy: kept for drag/zoom model interaction
+let backgroundTexture = null; // The texture for background image (kept for HDRI conversion)
 let backgroundImageSrc = null; // The image source URL (data URL)
 let backgroundImageOriginal = null; // The original Image element for reprocessing
 let backgroundImageNaturalWidth = 0;
 let backgroundImageNaturalHeight = 0;
+let backgroundHDRITexture = null; // PMREM-converted environment texture from background image
+let previousEnvironment = null; // Store original environment before HDRI override
 let animationMixer = null;
 let mainAnimAction = null;
 let mainAnimClip = null;
@@ -193,10 +203,16 @@ async function init() {
 	loader = new LoaderElement();
 	loader.attach(document.body);
 
-	// renderer
-	renderer = new WebGLRenderer({ antialias: true });
+	// renderer — alpha: true so CSS background shows through when no scene.background
+	renderer = new WebGLRenderer({ antialias: true, alpha: true });
 	renderer.toneMapping = ACESFilmicToneMapping;
 	document.body.appendChild(renderer.domElement);
+
+	// CSS background overlay behind the canvas
+	backgroundOverlay = document.createElement('img');
+	backgroundOverlay.id = 'background-overlay';
+	backgroundOverlay.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;object-fit:contain;z-index:-1;display:none;pointer-events:none;background:#000;';
+	document.body.insertBefore(backgroundOverlay, renderer.domElement);
 
 	// path tracer
 	pathTracer = new WebGLPathTracer(renderer);
@@ -343,7 +359,13 @@ function onParamsChange() {
 
 		scene.background = gradientMap;
 		scene.backgroundIntensity = 1;
-		scene.environmentRotation.y = 0;
+
+		// Only zero out env rotation for gradient if NOT using BG-as-HDRI
+		if (!params.backgroundAsHDRI) {
+
+			scene.environmentRotation.y = 0;
+
+		}
 
 	} else {
 
@@ -353,9 +375,11 @@ function onParamsChange() {
 
 	}
 
-	if (params.transparentBackground) {
+	if (params.transparentBackground || params.backgroundImageEnabled) {
 
-		// Transparent canvas for export (background image is now rendered inside canvas as a plane)
+		// Background image is displayed via CSS overlay behind the canvas.
+		// Set scene.background = null so canvas is transparent and CSS shows through.
+		// During capture, ImageRenderModal sets scene.background temporarily.
 		scene.background = null;
 		renderer.setClearAlpha(0);
 
@@ -677,13 +701,10 @@ async function updateBackgroundEmissive() {
 
 async function showBackgroundPlane() {
 
-	if (backgroundPlane && backgroundTexture) {
+	if (backgroundOverlay && backgroundImageSrc) {
 
-		backgroundPlane.visible = true;
-		scene.updateMatrixWorld(true);
-		await pathTracer.setSceneAsync(scene, activeCamera);
-		pathTracer.updateMaterials();
-		pathTracer.reset();
+		backgroundOverlay.src = backgroundImageSrc;
+		backgroundOverlay.style.display = 'block';
 
 	}
 
@@ -691,15 +712,100 @@ async function showBackgroundPlane() {
 
 async function hideBackgroundPlane() {
 
-	if (backgroundPlane) {
+	if (backgroundOverlay) {
 
-		backgroundPlane.visible = false;
-		scene.updateMatrixWorld(true);
-		await pathTracer.setSceneAsync(scene, activeCamera);
-		pathTracer.updateMaterials();
-		pathTracer.reset();
+		backgroundOverlay.style.display = 'none';
 
 	}
+
+}
+
+function applyBackgroundAsHDRI() {
+
+	if ( !backgroundImageOriginal || !params.backgroundAsHDRI ) {
+
+		// Disable: restore original environment
+		if ( previousEnvironment !== null ) {
+
+			scene.environment = previousEnvironment;
+			scene.environmentIntensity = params.environmentIntensity;
+			previousEnvironment = null;
+
+		}
+
+		if ( backgroundHDRITexture ) {
+
+			backgroundHDRITexture.dispose();
+			backgroundHDRITexture = null;
+
+		}
+
+		pathTracer.updateEnvironment();
+		pathTracer.reset();
+		return;
+
+	}
+
+	// Convert LDR image to DataTexture with raw RGBA float pixel data.
+	// The path tracer's EquirectHdrInfoUniform.updateFrom() needs image.data
+	// as a typed array for importance sampling — PMREM/GPU textures won't work.
+	const img = backgroundImageOriginal;
+	const cvs = document.createElement( 'canvas' );
+	cvs.width = img.width;
+	cvs.height = img.height;
+	const ctx = cvs.getContext( '2d' );
+	ctx.drawImage( img, 0, 0 );
+	const pixels = ctx.getImageData( 0, 0, img.width, img.height );
+
+	// Convert sRGB Uint8 → linear Float32
+	const floatData = new Float32Array( img.width * img.height * 4 );
+	for ( let i = 0; i < pixels.data.length; i += 4 ) {
+
+		floatData[ i ] = Math.pow( pixels.data[ i ] / 255, 2.2 );
+		floatData[ i + 1 ] = Math.pow( pixels.data[ i + 1 ] / 255, 2.2 );
+		floatData[ i + 2 ] = Math.pow( pixels.data[ i + 2 ] / 255, 2.2 );
+		floatData[ i + 3 ] = 1.0;
+
+	}
+
+	const envDataTexture = new DataTexture( floatData, img.width, img.height, RGBAFormat, FloatType );
+	envDataTexture.mapping = EquirectangularReflectionMapping;
+	envDataTexture.needsUpdate = true;
+
+	// Dispose old HDRI texture
+	if ( backgroundHDRITexture ) {
+
+		backgroundHDRITexture.dispose();
+
+	}
+
+	backgroundHDRITexture = envDataTexture;
+
+	// Store original environment if not already stored
+	if ( previousEnvironment === null ) {
+
+		previousEnvironment = scene.environment;
+
+	}
+
+	// Apply as environment lighting (does NOT affect the CSS background overlay)
+	scene.environment = envDataTexture;
+	scene.environmentIntensity = params.environmentIntensity;
+
+	pathTracer.updateEnvironment();
+	pathTracer.reset();
+
+	console.log( `✅ Background image converted to HDRI environment (${img.width}x${img.height} DataTexture)` );
+
+}
+
+function updateBackgroundHDRIIntensity() {
+
+	if ( !params.backgroundAsHDRI || !backgroundHDRITexture ) return;
+
+	scene.environmentIntensity = params.environmentIntensity;
+	pathTracer.updateEnvironment();
+	pathTracer.reset();
 
 }
 
@@ -721,31 +827,38 @@ function handleBackgroundImageUpload(file) {
 			backgroundImageSrc = e.target.result;
 			backgroundImageNaturalWidth = img.width;
 			backgroundImageNaturalHeight = img.height;
-			backgroundImageOriginal = img; // Store for reprocessing
+			backgroundImageOriginal = img; // Store for HDRI conversion
 
 			// Enable background
 			params.backgroundImageEnabled = true;
 
-			// Create/update background plane with emissive texture
-			createBackgroundPlane();
-			updateBackgroundPlaneTexture(img);
-			updateBackgroundPlaneTransform();
-			updateBackgroundTextureUVFit();
+			// Show as CSS overlay behind the canvas
+			if (backgroundOverlay) {
 
-			// Rebuild path tracer scene so it includes the background plane (otherwise it stays black)
-			scene.updateMatrixWorld(true);
-			await pathTracer.setSceneAsync(scene, activeCamera);
-			pathTracer.reset();
+				backgroundOverlay.src = backgroundImageSrc;
+				backgroundOverlay.style.display = 'block';
 
-			// Expose to window for ImageRenderModal
+			}
+
+			// Expose to window for ImageRenderModal capture
 			window.backgroundImageSrc = backgroundImageSrc;
 			window.backgroundImageNaturalWidth = backgroundImageNaturalWidth;
 			window.backgroundImageNaturalHeight = backgroundImageNaturalHeight;
 
+			// Auto-apply as HDRI if toggle is on
+			if (params.backgroundAsHDRI) {
+
+				applyBackgroundAsHDRI();
+
+			}
+
+			// Set canvas transparent so CSS overlay shows through
+			onParamsChange();
+
 			// Rebuild GUI
 			buildGui();
 
-			console.log(`✅ Background image loaded: ${img.width}x${img.height}`);
+			console.log(`✅ Background image loaded: ${img.width}x${img.height} (CSS overlay)`);
 
 		};
 		img.src = e.target.result;
@@ -928,6 +1041,14 @@ function buildGui() {
 	environmentFolder.add(params, 'envMap', envMaps).name('map').onChange(updateEnvMap);
 	environmentFolder.add(params, 'environmentIntensity', 0.0, 10.0).onChange(onParamsChange).name('intensity');
 	environmentFolder.add(params, 'environmentRotation', 0, 2 * Math.PI).onChange(onParamsChange);
+
+	// Use background image as environment lighting (PMREM conversion)
+	environmentFolder.add(params, 'backgroundAsHDRI').name('BG Image as HDRI').onChange(() => {
+
+		applyBackgroundAsHDRI();
+
+	});
+
 	environmentFolder.open();
 
 	const backgroundFolder = gui.addFolder('background');
@@ -977,12 +1098,7 @@ function buildGui() {
 
 		}
 
-	});
-
-	// Emissive intensity slider for background image
-	backgroundFolder.add(params, 'backgroundImageEmissive', 0, 10, 0.1).name('BG Emissive').onChange(() => {
-
-		updateBackgroundEmissive();
+		onParamsChange(); // Update canvas transparency
 
 	});
 
@@ -1000,29 +1116,34 @@ function buildGui() {
 			window.backgroundImageNaturalWidth = 0;
 			window.backgroundImageNaturalHeight = 0;
 
-			// Remove plane from scene
-			if (backgroundPlane) {
+			// Hide CSS overlay
+			if (backgroundOverlay) {
 
-				backgroundPlane.visible = false;
-				scene.remove(backgroundPlane);
-				if (backgroundPlane.material) backgroundPlane.material.dispose();
-				if (backgroundPlane.geometry) backgroundPlane.geometry.dispose();
-				backgroundPlane = null;
+				backgroundOverlay.style.display = 'none';
+				backgroundOverlay.src = '';
 
 			}
 
-			if (backgroundTexture) {
+			// Clean up HDRI conversion
+			params.backgroundAsHDRI = false;
+			if ( backgroundHDRITexture ) {
 
-				backgroundTexture.dispose();
-				backgroundTexture = null;
+				// Restore original environment
+				if ( previousEnvironment !== null ) {
+
+					scene.environment = previousEnvironment;
+					scene.environmentIntensity = params.environmentIntensity;
+					previousEnvironment = null;
+
+				}
+
+				backgroundHDRITexture.dispose();
+				backgroundHDRITexture = null;
 
 			}
 
-			// Rebuild path tracer without background plane and restore canvas size
-			scene.updateMatrixWorld(true);
-			await pathTracer.setSceneAsync(scene, activeCamera);
-			pathTracer.reset();
-			onResize(); // Restore canvas to full window dimensions
+			// Refresh path tracer environment and params
+			onParamsChange();
 			buildGui();
 
 		}
