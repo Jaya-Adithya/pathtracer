@@ -126,14 +126,14 @@ const params = {
 	pause: false,
 	previewSamplesMax: 1000,  // cap preview accumulation – final render uses its own target
 
+	floorMode: 'Shadow Catcher',  // 'Solid Ground' | 'Shadow Catcher'
 	floorColor: '#111111',
 	floorOpacity: 1.0,
 	floorRoughness: 0.2,
 	floorMetalness: 0.2,
 	floorTransmission: 0.0,
 	floorIOR: 1.5,
-	// Shadow/reflection catcher: floor shows only reflection + shadow (no ground color); rest transparent for PNG
-	floorShadowReflectionCatcher: true,
+	floorShadowReflectionCatcher: true,  // derived from floorMode
 
 	screenBrightness: 1, // Predefined wallpapers: 1; custom wallpaper defaults to 4.5 when selected
 	screenWallpaper: 'blank_screen', // Selected wallpaper
@@ -1268,13 +1268,7 @@ function buildGui() {
 	backgroundFolder.addColor(params, 'bgGradientTop').onChange(onParamsChange);
 	backgroundFolder.addColor(params, 'bgGradientBottom').onChange(onParamsChange);
 	backgroundFolder.add(params, 'backgroundBlur', 0, 1).onChange(onParamsChange);
-	backgroundFolder.add(params, 'transparentBackground', 0, 1).onChange(onParamsChange);
-	backgroundFolder.add(params, 'checkerboardTransparency').onChange(v => {
-
-		if (v) document.body.classList.add('checkerboard');
-		else document.body.classList.remove('checkerboard');
-
-	});
+	// transparentBackground and checkerboardTransparency removed — PNG auto-handles transparency
 
 	// Background image upload (emissive plane inside canvas)
 	backgroundFolder.add({
@@ -1361,15 +1355,56 @@ function buildGui() {
 		}
 	}, 'removeBackgroundImage').name('Remove Background');
 
-	const floorFolder = gui.addFolder('floor');
-	floorFolder.add(params, 'floorShadowReflectionCatcher').name('PNG ground (catcher)').onChange(onParamsChange);
-	floorFolder.addColor(params, 'floorColor').onChange(onParamsChange);
-	floorFolder.add(params, 'floorRoughness', 0, 1).onChange(onParamsChange);
-	floorFolder.add(params, 'floorMetalness', 0, 1).onChange(onParamsChange);
-	floorFolder.add(params, 'floorOpacity', 0, 1).onChange(onParamsChange);
-	floorFolder.add(params, 'floorTransmission', 0, 1).name('Floor transmission (glass)').onChange(onParamsChange);
-	floorFolder.add(params, 'floorIOR', 1.0, 2.0, 0.01).name('Floor IOR').onChange(onParamsChange);
-	floorFolder.close();
+	const floorFolder = gui.addFolder( 'Floor' );
+
+	// Floor mode toggle
+	const floorModeCtrl = floorFolder.add( params, 'floorMode', [ 'Solid Ground', 'Shadow Catcher' ] ).name( 'Mode' );
+
+	// Solid-only controls (hidden in catcher mode)
+	const solidControls = [];
+	solidControls.push( floorFolder.addColor( params, 'floorColor' ).onChange( onParamsChange ) );
+	solidControls.push( floorFolder.add( params, 'floorOpacity', 0, 1 ).onChange( onParamsChange ) );
+	solidControls.push( floorFolder.add( params, 'floorTransmission', 0, 1 ).name( 'Transmission' ).onChange( onParamsChange ) );
+	solidControls.push( floorFolder.add( params, 'floorIOR', 1.0, 2.0, 0.01 ).name( 'IOR' ).onChange( onParamsChange ) );
+
+	// Shared controls (visible in both modes)
+	floorFolder.add( params, 'floorRoughness', 0, 1 ).onChange( onParamsChange );
+	floorFolder.add( params, 'floorMetalness', 0, 1 ).onChange( onParamsChange );
+
+	function applyFloorMode( mode ) {
+
+		const isCatcher = mode === 'Shadow Catcher';
+		params.floorShadowReflectionCatcher = isCatcher;
+
+		// Show/hide solid-only controls
+		solidControls.forEach( ctrl => {
+
+			ctrl.domElement.style.display = isCatcher ? 'none' : '';
+
+		} );
+
+		// In catcher mode make raster fallback floor semi-transparent so it doesn't flash solid
+		if ( isCatcher ) {
+
+			floorPlane.material.opacity = 0.15;
+			floorPlane.material.transparent = true;
+
+		} else {
+
+			floorPlane.material.opacity = params.floorOpacity;
+			floorPlane.material.transparent = params.floorOpacity < 1 || params.floorTransmission > 0;
+
+		}
+
+		onParamsChange();
+
+	}
+
+	floorModeCtrl.onChange( applyFloorMode );
+	// Apply initial state
+	applyFloorMode( params.floorMode );
+
+	floorFolder.open();
 
 	// Screen controls: only show when wallpaper meshes were detected
 	if (Object.keys(wallpaperMeshes).some(key => wallpaperMeshes[key] !== null)) {

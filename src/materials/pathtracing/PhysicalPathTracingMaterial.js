@@ -30,15 +30,15 @@ export class PhysicalPathTracingMaterial extends MaterialBase {
 
 	onBeforeRender() {
 
-		this.setDefine( 'FEATURE_DOF', this.physicalCamera.bokehSize === 0 ? 0 : 1 );
-		this.setDefine( 'FEATURE_BACKGROUND_MAP', this.backgroundMap ? 1 : 0 );
-		this.setDefine( 'FEATURE_FOG', this.materials.features.isUsed( 'FOG' ) ? 1 : 0 );
+		this.setDefine('FEATURE_DOF', this.physicalCamera.bokehSize === 0 ? 0 : 1);
+		this.setDefine('FEATURE_BACKGROUND_MAP', this.backgroundMap ? 1 : 0);
+		this.setDefine('FEATURE_FOG', this.materials.features.isUsed('FOG') ? 1 : 0);
 
 	}
 
-	constructor( parameters ) {
+	constructor(parameters) {
 
-		super( {
+		super({
 
 			transparent: true,
 			depthWrite: false,
@@ -46,9 +46,10 @@ export class PhysicalPathTracingMaterial extends MaterialBase {
 			defines: {
 				FEATURE_MIS: 1,
 				FEATURE_RUSSIAN_ROULETTE: 1,
-				FEATURE_DOF: 1,
+				// Match common runtime values to avoid recompilation on first render
+				FEATURE_DOF: 0,
 				FEATURE_BACKGROUND_MAP: 0,
-				FEATURE_FOG: 1,
+				FEATURE_FOG: 0,
 
 				// 0 = PCG
 				// 1 = Sobol
@@ -92,11 +93,13 @@ export class PhysicalPathTracingMaterial extends MaterialBase {
 
 				// light uniforms
 				lights: { value: new LightsInfoUniformStruct() },
-				iesProfiles: { value: new RenderTarget2DArray( 360, 180, {
-					type: HalfFloatType,
-					wrapS: ClampToEdgeWrapping,
-					wrapT: ClampToEdgeWrapping,
-				} ).texture },
+				iesProfiles: {
+					value: new RenderTarget2DArray(360, 180, {
+						type: HalfFloatType,
+						wrapS: ClampToEdgeWrapping,
+						wrapT: ClampToEdgeWrapping,
+					}).texture
+				},
 				environmentIntensity: { value: 1.0 },
 				environmentRotation: { value: new Matrix4() },
 				environmentSaturation: { value: 1.0 },
@@ -113,7 +116,7 @@ export class PhysicalPathTracingMaterial extends MaterialBase {
 				seed: { value: 0 },
 				sobolTexture: { value: null },
 				stratifiedTexture: { value: new StratifiedSamplesTexture() },
-				stratifiedOffsetTexture: { value: new BlueNoiseTexture( 64, 1 ) },
+				stratifiedOffsetTexture: { value: new BlueNoiseTexture(64, 1) },
 			},
 
 			vertexShader: /* glsl */`
@@ -142,27 +145,27 @@ export class PhysicalPathTracingMaterial extends MaterialBase {
 				#include <common>
 
 				// bvh intersection
-				${ BVHShaderGLSL.common_functions }
-				${ BVHShaderGLSL.bvh_struct_definitions }
-				${ BVHShaderGLSL.bvh_ray_functions }
+				${BVHShaderGLSL.common_functions}
+				${BVHShaderGLSL.bvh_struct_definitions}
+				${BVHShaderGLSL.bvh_ray_functions}
 
 				// uniform structs
-				${ StructsGLSL.camera_struct }
-				${ StructsGLSL.lights_struct }
-				${ StructsGLSL.equirect_struct }
-				${ StructsGLSL.material_struct }
-				${ StructsGLSL.surface_record_struct }
+				${StructsGLSL.camera_struct}
+				${StructsGLSL.lights_struct}
+				${StructsGLSL.equirect_struct}
+				${StructsGLSL.material_struct}
+				${StructsGLSL.surface_record_struct}
 
 				// random
 				#if RANDOM_TYPE == 2 	// Stratified List
 
-					${ RandomGLSL.stratified_functions }
+					${RandomGLSL.stratified_functions}
 
 				#elif RANDOM_TYPE == 1 	// Sobol
 
-					${ RandomGLSL.pcg_functions }
-					${ RandomGLSL.sobol_common }
-					${ RandomGLSL.sobol_functions }
+					${RandomGLSL.pcg_functions}
+					${RandomGLSL.sobol_common}
+					${RandomGLSL.sobol_functions}
 
 					#define rand(v) sobol(v)
 					#define rand2(v) sobol2(v)
@@ -171,7 +174,7 @@ export class PhysicalPathTracingMaterial extends MaterialBase {
 
 				#else 					// PCG
 
-				${ RandomGLSL.pcg_functions }
+				${RandomGLSL.pcg_functions}
 
 					// Using the sobol functions seems to break the the compiler on MacOS
 					// - specifically the "sobolReverseBits" function.
@@ -187,11 +190,11 @@ export class PhysicalPathTracingMaterial extends MaterialBase {
 				#endif
 
 				// common
-				${ CommonGLSL.texture_sample_functions }
-				${ CommonGLSL.fresnel_functions }
-				${ CommonGLSL.util_functions }
-				${ CommonGLSL.math_functions }
-				${ CommonGLSL.shape_intersection_functions }
+				${CommonGLSL.texture_sample_functions}
+				${CommonGLSL.fresnel_functions}
+				${CommonGLSL.util_functions}
+				${CommonGLSL.math_functions}
+				${CommonGLSL.shape_intersection_functions}
 
 				// environment
 				uniform EquirectHdrInfo envMapInfo;
@@ -255,16 +258,16 @@ export class PhysicalPathTracingMaterial extends MaterialBase {
 				float lightsDenom;
 
 				// sampling
-				${ SamplingGLSL.shape_sampling_functions }
-				${ SamplingGLSL.equirect_functions }
-				${ SamplingGLSL.light_sampling_functions }
+				${SamplingGLSL.shape_sampling_functions}
+				${SamplingGLSL.equirect_functions}
+				${SamplingGLSL.light_sampling_functions}
 
-				${ PTBVHGLSL.inside_fog_volume_function }
-				${ BSDFGLSL.ggx_functions }
-				${ BSDFGLSL.sheen_functions }
-				${ BSDFGLSL.iridescence_functions }
-				${ BSDFGLSL.fog_functions }
-				${ BSDFGLSL.bsdf_functions }
+				${PTBVHGLSL.inside_fog_volume_function}
+				${BSDFGLSL.ggx_functions}
+				${BSDFGLSL.sheen_functions}
+				${BSDFGLSL.iridescence_functions}
+				${BSDFGLSL.fog_functions}
+				${BSDFGLSL.bsdf_functions}
 
 				float applyFilteredGlossy( float roughness, float accumulatedRoughness ) {
 
@@ -296,12 +299,12 @@ export class PhysicalPathTracingMaterial extends MaterialBase {
 
 				}
 
-				${ RenderGLSL.render_structs }
-				${ RenderGLSL.camera_util_functions }
-				${ RenderGLSL.trace_scene_function }
-				${ RenderGLSL.attenuate_hit_function }
-				${ RenderGLSL.direct_light_contribution_function }
-				${ RenderGLSL.get_surface_record_function }
+				${RenderGLSL.render_structs}
+				${RenderGLSL.camera_util_functions}
+				${RenderGLSL.trace_scene_function}
+				${RenderGLSL.attenuate_hit_function}
+				${RenderGLSL.direct_light_contribution_function}
+				${RenderGLSL.get_surface_record_function}
 
 				void main() {
 
@@ -479,10 +482,17 @@ export class PhysicalPathTracingMaterial extends MaterialBase {
 						}
 
 						// shadow/reflection catcher: only reflection (geometry) + shadow; no floor color, no env on floor
+						// Uses BSDF sampling so roughness/metalness controls affect the reflection
 						if ( material.shadowReflectionCatcher && state.firstRay ) {
 
 							vec3 hitPoint = stepRayOrigin( ray.origin, ray.direction, surf.faceNormal, surfaceHit.dist );
-							vec3 reflDir = reflect( ray.direction, surf.faceNormal );
+							// Roughness-aware reflection via BSDF instead of perfect mirror
+							ScatterRecord catcherScatter = bsdfSample( - ray.direction, surf );
+							vec3 reflDir = catcherScatter.direction;
+							// Ensure reflection goes above surface
+							if ( dot( reflDir, surf.faceNormal ) < 0.0 ) {
+								reflDir = reflect( ray.direction, surf.faceNormal );
+							}
 							Ray reflRay;
 							reflRay.origin = stepRayOrigin( hitPoint, reflDir, surf.faceNormal, 0.0 );
 							reflRay.direction = reflDir;
@@ -533,9 +543,31 @@ export class PhysicalPathTracingMaterial extends MaterialBase {
 								}
 
 							}
-							state.isShadowRay = false;
-							gl_FragColor.rgb = reflectionColor * ( 1.0 - shadowFactor );
-							float refLum = dot( reflectionColor, vec3( 0.2126, 0.7152, 0.0722 ) );
+							// Shadow/Reflection Catcher Logic
+							// Simplified weight calculation to avoid heavy BSDF PDF computation.
+							// We approximate the reflection intensity using Fresnel.
+
+							state.isShadowRay = false; // We are tracing a reflection ray now
+
+							// Calculate approximate weight based on Fresnel
+							// This makes reflections stronger at grazing angles and respects base color for metals.
+							vec3 halfVector = normalize( - ray.direction + catcherScatter.direction );
+							float dotVH = saturate( dot( - ray.direction, halfVector ) );
+
+							// Retrieve F0 from surface parameters
+							// Dialectric F0 is monochromatic (surf.f0), Metal F0 is colored (surf.color)
+							vec3 f0 = mix( vec3( surf.f0 * surf.specularIntensity ), surf.color, surf.metalness );
+							
+							// Compute Fresnel term
+							vec3 fresnel = schlickFresnel( dotVH, f0 );
+
+							// Apply Fresnel weight to reflection
+							// We effectively treat the geometric masking (G) as 1.0 for this approximation,
+							// relying on the scattered direction to provide the "blur" from roughness.
+							gl_FragColor.rgb = reflectionColor * fresnel * ( 1.0 - shadowFactor );
+
+							// 3. Compute alpha based on luminance of the FINAL weighted reflection
+							float refLum = dot( gl_FragColor.rgb, vec3( 0.2126, 0.7152, 0.0722 ) );
 							gl_FragColor.a = ( refLum > 0.01 || shadowFactor > 0.0 ) ? 1.0 : 0.0;
 							break;
 
@@ -658,9 +690,9 @@ export class PhysicalPathTracingMaterial extends MaterialBase {
 
 			`
 
-		} );
+		});
 
-		this.setValues( parameters );
+		this.setValues(parameters);
 
 	}
 
