@@ -381,6 +381,10 @@ export class ImageRenderModal {
 			this.originalSettings.filterGlossyFactor = this.pathTracer.filterGlossyFactor;
 			this.originalSettings.multipleImportanceSampling = this.pathTracer.multipleImportanceSampling;
 			this.originalSettings.toneMapping = this.renderer.toneMapping;
+			this.originalSettings.textureSize = this.pathTracer.textureSize.clone();
+
+			// Bump texture atlas to full 4K for final render quality
+			this.pathTracer.textureSize.set( 4096, 4096 );
 
 			// CRITICAL: Account for renderScale when checking GPU limits
 			// The path tracer multiplies renderer size by renderScale to get actual render target size
@@ -888,6 +892,17 @@ export class ImageRenderModal {
 		this.pathTracer.renderScale = this.originalSettings.renderScale; // Restore original renderScale
 		this.pathTracer.filterGlossyFactor = this.originalSettings.filterGlossyFactor;
 		this.pathTracer.multipleImportanceSampling = this.originalSettings.multipleImportanceSampling;
+		if ( this.originalSettings.textureSize ) {
+
+			this.pathTracer.textureSize.copy( this.originalSettings.textureSize );
+			// Repack texture atlas at preview resolution
+			if ( typeof this.pathTracer.updateMaterials === 'function' ) {
+
+				this.pathTracer.updateMaterials();
+
+			}
+
+		}
 		if ( this.originalSettings.toneMapping !== null ) {
 
 			this.renderer.toneMapping = this.originalSettings.toneMapping;

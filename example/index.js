@@ -97,7 +97,7 @@ const params = {
 	// We spread getScaledSettings() first so these explicit values always win.
 	...getScaledSettings(),
 	renderScale: 2, // 🔥 Requested: internal render scale 3x
-	tiles: 2,
+	tiles: 1,       // 1 tile = no splitting = fastest preview responsiveness
 
 	model: '',
 
@@ -124,6 +124,7 @@ const params = {
 	bounces: 5,
 	filterGlossyFactor: 0.1,
 	pause: false,
+	previewSamplesMax: 1000,  // cap preview accumulation – final render uses its own target
 
 	floorColor: '#111111',
 	floorOpacity: 1.0,
@@ -350,7 +351,12 @@ function animate() {
 
 		if (!params.pause || pathTracer.samples < 1) {
 
-			pathTracer.renderSample();
+			// Stop accumulating once preview cap is reached
+			if ( pathTracer.samples < params.previewSamplesMax ) {
+
+				pathTracer.renderSample();
+
+			}
 
 		}
 
@@ -360,7 +366,7 @@ function animate() {
 
 	}
 
-	loader.setSamples(pathTracer.samples, pathTracer.isCompiling);
+	loader.setSamples(pathTracer.samples, pathTracer.isCompiling, params.previewSamplesMax);
 
 }
 
@@ -980,19 +986,50 @@ function buildGui() {
 
 		const animationFolder = gui.addFolder('Animation');
 		const maxFrame = Math.floor( ( mainAnimClip.duration || 5 ) * ANIMATION_FRAME_RATE );
-		animationFolder.add(params, 'animationFrame', 0, maxFrame, 1).name(`Frame (0–${maxFrame})`).onChange(async (frame) => {
+		let _animFrameDebounce = null;
+		let _animDragging = false;
+		let _animPrevPause = false;
+		animationFolder.add(params, 'animationFrame', 0, maxFrame, 1).name(`Frame (0–${maxFrame})`).onChange(( frame ) => {
 
+			// Pause path tracing on first drag tick so the GPU isn't fighting us
+			if ( ! _animDragging ) {
+
+				_animDragging = true;
+				_animPrevPause = params.pause;
+				params.pause = true;
+
+			}
+
+			// 1. Pose update — cheap
 			const timeInSeconds = Math.min(frame / ANIMATION_FRAME_RATE, mainAnimClip.duration || 5);
 			mainAnimAction.time = timeInSeconds;
 			animationMixer.update(0);
-			// Path tracer uses a BVH built from a snapshot of the scene; raster view uses live scene.
-			// Rebuild the path tracer scene so it bakes the new pose and BVH (then it works in path tracer view).
 			scene.updateMatrixWorld(true);
-			try {
-				await pathTracer.setSceneAsync(scene, activeCamera);
-			} catch (e) {
-				console.error('Failed to update path tracer scene for animation frame', e);
-			}
+
+			// 2. Quick raster preview
+			renderer.render( scene, activeCamera );
+
+			// 3. Debounce heavy BVH rebuild — 2 s after the user stops dragging
+			clearTimeout( _animFrameDebounce );
+			_animFrameDebounce = setTimeout( async () => {
+
+				try {
+
+					await pathTracer.setSceneAsync( scene, activeCamera );
+					pathTracer.updateCamera();
+					pathTracer.reset();
+
+				} catch (e) {
+
+					console.error('Failed to update path tracer scene for animation frame', e);
+
+				}
+
+				// Restore pause state so path tracing resumes
+				_animDragging = false;
+				params.pause = _animPrevPause;
+
+			}, 2000 );
 
 		});
 		// Include Off screen in Animation folder only when wallpaper meshes were detected
@@ -1117,6 +1154,7 @@ function buildGui() {
 		pathTracer.tiles.set(v, v);
 
 	});
+	pathTracingFolder.add(params, 'previewSamplesMax', 100, 5000, 100).name('Preview Sample Cap');
 	pathTracingFolder.add(params, 'cameraProjection', ['Perspective', 'Orthographic']).onChange(v => {
 
 		updateCameraProjection(v);

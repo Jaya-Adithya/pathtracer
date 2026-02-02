@@ -64,6 +64,11 @@ function initializeStyles() {
 		.loader-container .samples {
 			color: rgba( 255, 255, 255, 0.75 );
 		}
+
+		.loader-container .samples {
+			font-size: 12px;
+			letter-spacing: 0.5px;
+		}
 	`;
 	document.head.appendChild( _styleElement );
 
@@ -142,11 +147,15 @@ export class LoaderElement {
 
 	}
 
-	setSamples( count, compiling = false ) {
+	setSamples( count, compiling = false, maxSamples = 0 ) {
 
 		if ( compiling ) {
 
 			this._samples.innerText = 'compiling shader...';
+
+		} else if ( maxSamples > 0 ) {
+
+			this._samples.innerText = `${ Math.floor( count ) } / ${ maxSamples } samples`;
 
 		} else {
 
