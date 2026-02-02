@@ -43,6 +43,12 @@ declare module 'three/src/materials/MeshStandardMaterial' {
 		 * Used by `WebGLPathTracer` from `three-gpu-pathtracer`.
 		 */
 		castShadow: boolean;
+		/**
+		 * Shadow/reflection catcher: invisible to camera except where it shows
+		 * reflection of the scene and shadows. Used for PNG output with transparent
+		 * ground (no ground color, no HDRI on floor). Used by `WebGLPathTracer`.
+		 */
+		shadowReflectionCatcher: boolean;
 
 	}
 

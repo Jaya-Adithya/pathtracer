@@ -132,6 +132,8 @@ const params = {
 	floorMetalness: 0.2,
 	floorTransmission: 0.0,
 	floorIOR: 1.5,
+	// Shadow/reflection catcher: floor shows only reflection + shadow (no ground color); rest transparent for PNG
+	floorShadowReflectionCatcher: true,
 
 	screenBrightness: 1, // Predefined wallpapers: 1; custom wallpaper defaults to 4.5 when selected
 	screenWallpaper: 'blank_screen', // Selected wallpaper
@@ -309,6 +311,7 @@ async function init() {
 			transmission: 0.0,
 			ior: 1.5,
 			side: DoubleSide,
+			shadowReflectionCatcher: params.floorShadowReflectionCatcher,
 		})
 	);
 	floorPlane.scale.setScalar(5);
@@ -419,6 +422,7 @@ function onParamsChange() {
 	floorPlane.material.opacity = params.floorOpacity;
 	floorPlane.material.transmission = params.floorTransmission;
 	floorPlane.material.ior = params.floorIOR;
+	floorPlane.material.shadowReflectionCatcher = params.floorShadowReflectionCatcher;
 
 	scene.environmentIntensity = params.environmentIntensity;
 	scene.environmentRotation.y = params.environmentRotation;
@@ -1358,6 +1362,7 @@ function buildGui() {
 	}, 'removeBackgroundImage').name('Remove Background');
 
 	const floorFolder = gui.addFolder('floor');
+	floorFolder.add(params, 'floorShadowReflectionCatcher').name('PNG ground (catcher)').onChange(onParamsChange);
 	floorFolder.addColor(params, 'floorColor').onChange(onParamsChange);
 	floorFolder.add(params, 'floorRoughness', 0, 1).onChange(onParamsChange);
 	floorFolder.add(params, 'floorMetalness', 0, 1).onChange(onParamsChange);

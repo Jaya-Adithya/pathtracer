@@ -478,6 +478,69 @@ export class PhysicalPathTracingMaterial extends MaterialBase {
 
 						}
 
+						// shadow/reflection catcher: only reflection (geometry) + shadow; no floor color, no env on floor
+						if ( material.shadowReflectionCatcher && state.firstRay ) {
+
+							vec3 hitPoint = stepRayOrigin( ray.origin, ray.direction, surf.faceNormal, surfaceHit.dist );
+							vec3 reflDir = reflect( ray.direction, surf.faceNormal );
+							Ray reflRay;
+							reflRay.origin = stepRayOrigin( hitPoint, reflDir, surf.faceNormal, 0.0 );
+							reflRay.direction = reflDir;
+							SurfaceHit reflHit;
+							int reflHitType = traceScene( reflRay, state.fogMaterial, reflHit );
+							vec3 reflectionColor = vec3( 0.0 );
+							if ( reflHitType == SURFACE_HIT ) {
+
+								uint reflMatIndex = uTexelFetch1D( materialIndexAttribute, reflHit.faceIndices.x ).r;
+								Material reflMat = readMaterialInfo( materials, reflMatIndex );
+								SurfaceRecord reflSurf;
+								if ( getSurfaceRecord( reflMat, reflHit, attributesArray, 0.0, reflSurf ) != SKIP_SURFACE ) {
+
+									vec3 reflHitPoint = stepRayOrigin( reflRay.origin, reflRay.direction, reflSurf.faceNormal, reflHit.dist );
+									reflectionColor = reflSurf.emission + directLightContribution( - reflDir, reflSurf, state, reflHitPoint );
+
+								}
+
+							}
+							float shadowFactor = 0.0;
+							state.isShadowRay = true;
+							if ( lightsDenom != 0.0 && rand( 9 ) < float( lights.count ) / lightsDenom ) {
+
+								LightRecord lightRec = randomLightSample( lights.tex, iesProfiles, lights.count, hitPoint, rand3( 10 ) );
+								if ( dot( surf.faceNormal, lightRec.direction ) >= 0.0 && lightRec.pdf > 0.0 ) {
+
+									Ray lightRay;
+									lightRay.origin = hitPoint;
+									lightRay.direction = lightRec.direction;
+									vec3 att;
+									if ( attenuateHit( state, lightRay, lightRec.dist, att ) ) shadowFactor = 1.0;
+
+								}
+
+							} else if ( envMapInfo.totalSum != 0.0 && environmentIntensity != 0.0 ) {
+
+								vec3 envColor, envDirection;
+								float envPdf = sampleEquirectProbability( rand2( 11 ), envColor, envDirection );
+								envDirection = invEnvRotation3x3 * envDirection;
+								if ( dot( surf.faceNormal, envDirection ) >= 0.0 && envPdf > 0.0 ) {
+
+									Ray envRay;
+									envRay.origin = hitPoint;
+									envRay.direction = envDirection;
+									vec3 att;
+									if ( attenuateHit( state, envRay, INFINITY, att ) ) shadowFactor = 1.0;
+
+								}
+
+							}
+							state.isShadowRay = false;
+							gl_FragColor.rgb = reflectionColor * ( 1.0 - shadowFactor );
+							float refLum = dot( reflectionColor, vec3( 0.2126, 0.7152, 0.0722 ) );
+							gl_FragColor.a = ( refLum > 0.01 || shadowFactor > 0.0 ) ? 1.0 : 0.0;
+							break;
+
+						}
+
 						scatterRec = bsdfSample( - ray.direction, surf );
 						state.isShadowRay = scatterRec.specularPdf < rand( 4 );
 

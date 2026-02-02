@@ -379,7 +379,7 @@ export class MaterialsTexture extends DataTexture {
 			// sample 14
 			floatArray[ index ++ ] = Number( getField( m, 'matte', false ) ); // matte
 			floatArray[ index ++ ] = Number( getField( m, 'castShadow', true ) ); // shadow
-			floatArray[ index ++ ] = Number( m.vertexColors ) | ( Number( m.flatShading ) << 1 ); // vertexColors & flatShading
+			floatArray[ index ++ ] = Number( m.vertexColors ) | ( Number( m.flatShading ) << 1 ) | ( Number( getField( m, 'fogVolume', false ) ) << 2 ) | ( Number( getField( m, 'shadowReflectionCatcher', false ) ) << 3 ); // vertexColors, flatShading, fogVolume, shadowReflectionCatcher
 			floatArray[ index ++ ] = Number( m.transparent ); // transparent
 
 			// map transform 15

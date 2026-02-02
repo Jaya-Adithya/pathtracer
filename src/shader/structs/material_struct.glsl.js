@@ -54,6 +54,7 @@ export const material_struct = /* glsl */ `
 
 		float side;
 		bool matte;
+		bool shadowReflectionCatcher;
 
 		float sheen;
 		vec3 sheenColor;
@@ -181,6 +182,7 @@ export const material_struct = /* glsl */ `
 		m.vertexColors = bool( int( s14.b ) & 1 );
 		m.flatShading = bool( int( s14.b ) & 2 );
 		m.fogVolume = bool( int( s14.b ) & 4 );
+		m.shadowReflectionCatcher = bool( int( s14.b ) & 8 );
 		m.transparent = bool( s14.a );
 
 		uint firstTextureTransformIdx = i + 15u;
