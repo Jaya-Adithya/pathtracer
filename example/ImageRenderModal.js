@@ -916,16 +916,19 @@ export class ImageRenderModal {
 
 		}
 
-		// Restore original renderer size
-		if ( this.originalSize.width > 0 && this.originalSize.height > 0 ) {
+		// Restore renderer to current window size (most robust — handles resize during render)
+		const restoreW = window.innerWidth;
+		const restoreH = window.innerHeight;
+		const restoreDPR = window.devicePixelRatio;
+		if ( restoreW > 0 && restoreH > 0 ) {
 
-			this.renderer.setSize( this.originalSize.width, this.originalSize.height );
-			this.renderer.setPixelRatio( this.originalPixelRatio );
+			this.renderer.setPixelRatio( restoreDPR );
+			this.renderer.setSize( restoreW, restoreH );
 
-			// Update camera aspect (restore original)
+			// Update camera aspect (restore to current window)
 			if ( this.camera.isPerspectiveCamera ) {
 
-				const aspect = this.originalSize.width / this.originalSize.height;
+				const aspect = restoreW / restoreH;
 				this.camera.aspect = aspect;
 				this.camera.updateProjectionMatrix();
 
@@ -938,9 +941,9 @@ export class ImageRenderModal {
 
 			}
 
-			// Resize path tracer back to original size (same logic as when starting render)
-			const drawW = this.originalSize.width * this.originalPixelRatio;
-			const drawH = this.originalSize.height * this.originalPixelRatio;
+			// Resize path tracer back to match the restored canvas drawing buffer
+			const drawW = restoreW * restoreDPR;
+			const drawH = restoreH * restoreDPR;
 			const w = Math.floor( this.originalSettings.renderScale * drawW );
 			const h = Math.floor( this.originalSettings.renderScale * drawH );
 			if ( this.pathTracer._pathTracer && typeof this.pathTracer._pathTracer.setSize === 'function' ) {

@@ -217,7 +217,7 @@ async function init() {
 	loader.attach(document.body);
 
 	// renderer — alpha + premultipliedAlpha:false so CSS background shows through
-	renderer = new WebGLRenderer({ antialias: true, alpha: true, premultipliedAlpha: false });
+	renderer = new WebGLRenderer({ antialias: true, alpha: true, premultipliedAlpha: false, preserveDrawingBuffer: true });
 	renderer.toneMapping = ACESFilmicToneMapping;
 
 	// Wrap canvas + CSS background overlay in a container (like StudioX)
