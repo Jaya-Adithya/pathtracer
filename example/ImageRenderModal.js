@@ -214,6 +214,7 @@ export class ImageRenderModal {
 
 	open() {
 
+		if ( this.onOpen ) this.onOpen();
 		this.isOpen = true;
 		this.modal.style.display = 'flex';
 		document.body.style.overflow = 'hidden';
@@ -237,12 +238,16 @@ export class ImageRenderModal {
 		this.isOpen = false;
 		this.modal.style.display = 'none';
 		document.body.style.overflow = '';
+		if ( this.onClose ) this.onClose();
 
 	}
 
 	async handleRender() {
 
 		if ( this.isRendering ) return;
+
+		// Turn path tracer back on so canvas accumulates and we can capture (main point of render)
+		if ( this.onBeforeRender ) this.onBeforeRender();
 
 		this.isRendering = true;
 		this.stopRequested = false;
@@ -368,10 +373,12 @@ export class ImageRenderModal {
 
 			console.log( `📐 [Render] Final target resolution: ${width}x${height} (clamped from ${originalWidth}x${originalHeight})` );
 
-			// Store original renderer size
-			this.originalSize.width = this.renderer.domElement.width;
-			this.originalSize.height = this.renderer.domElement.height;
+			// Store original renderer CSS size (NOT drawing buffer size)
+			// renderer.domElement.width/height = CSS size × pixelRatio (drawing buffer)
+			// renderer.setSize() expects CSS pixels and multiplies by pixelRatio internally
 			this.originalPixelRatio = this.renderer.getPixelRatio();
+			this.originalSize.width = Math.round( this.renderer.domElement.width / this.originalPixelRatio );
+			this.originalSize.height = Math.round( this.renderer.domElement.height / this.originalPixelRatio );
 
 			// Store original path tracer settings (to restore after rendering)
 			this.originalSettings.tiles.x = this.pathTracer.tiles.x;
@@ -968,6 +975,9 @@ export class ImageRenderModal {
 			this.pathTracer.updateEnvironment();
 
 		}
+
+		// Force clean restart so the preview begins accumulating from scratch
+		this.pathTracer.reset();
 
 	}
 

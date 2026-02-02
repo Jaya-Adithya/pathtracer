@@ -20,12 +20,14 @@ function initializeStyles() {
 			font-size: 14px;
 			pointer-events: none;
 			user-select: none;
+			z-index: 100;
 		}
 
 		.loader-container {
 			display: flex;
 			flex-direction: column;
 			bottom: 0;
+			left: 0;
 		}
 
 		.description {

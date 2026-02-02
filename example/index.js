@@ -165,6 +165,10 @@ let wallpaperMeshes = {}; // Store all wallpaper meshes: { 'blank_screen': mesh,
 let currentWallpaper = 'blank_screen'; // Current selected wallpaper
 let imageRenderModal = null; // Image render modal instance
 
+// Pause state: distinguish user-paused vs auto-paused (reached target samples)
+let _autoPausedDueToSamples = false;
+let enableController = null; // GUI controller for params.enable (Path Tracer checkbox)
+
 // Background image state (CSS overlay behind canvas + HDRI conversion)
 let backgroundOverlay = null; // CSS <img> element behind the canvas
 let backgroundPlane = null; // Legacy: kept for drag/zoom model interaction
@@ -262,6 +266,8 @@ async function init() {
 	controls.addEventListener('change', () => {
 
 		pathTracer.updateCamera();
+		// Reset accumulation for new view and resume if we had auto-paused at target samples
+		resetPathTracerAndResumeIfAutoPaused();
 
 	});
 
@@ -349,9 +355,26 @@ function animate() {
 
 	if (params.enable) {
 
-		if (!params.pause || pathTracer.samples < 1) {
+		// If we were auto-paused but current samples dropped below target (e.g. reset, scene/camera change), resume
+		if ( _autoPausedDueToSamples && pathTracer.samples < params.previewSamplesMax ) {
 
-			// Stop accumulating once preview cap is reached
+			_autoPausedDueToSamples = false;
+			params.pause = false;
+
+		}
+
+		// Auto-pause when we reach target samples (performance: stop accumulation)
+		if ( pathTracer.samples >= params.previewSamplesMax && pathTracer.samples >= 1 ) {
+
+			if ( ! params.pause ) {
+
+				params.pause = true;
+				_autoPausedDueToSamples = true;
+
+			}
+
+		} else if ( ! params.pause || pathTracer.samples < 1 ) {
+
 			if ( pathTracer.samples < params.previewSamplesMax ) {
 
 				pathTracer.renderSample();
@@ -367,6 +390,19 @@ function animate() {
 	}
 
 	loader.setSamples(pathTracer.samples, pathTracer.isCompiling, params.previewSamplesMax);
+
+}
+
+// Wrapper: reset path tracer and, if we had auto-paused due to samples, resume (unpause)
+function resetPathTracerAndResumeIfAutoPaused() {
+
+	pathTracer.reset();
+	if ( _autoPausedDueToSamples ) {
+
+		_autoPausedDueToSamples = false;
+		params.pause = false;
+
+	}
 
 }
 
@@ -536,7 +572,7 @@ async function endBackgroundDrag() {
 	// Rebuild path tracer scene because contentGroup transforms changed
 	scene.updateMatrixWorld(true);
 	await pathTracer.setSceneAsync(scene, activeCamera);
-	pathTracer.reset();
+	resetPathTracerAndResumeIfAutoPaused();
 
 }
 
@@ -730,7 +766,7 @@ function updateBackgroundPlaneTexture(img) {
 
 	// Update path tracer
 	pathTracer.updateMaterials();
-	pathTracer.reset();
+	resetPathTracerAndResumeIfAutoPaused();
 
 	console.log(`✅ Background plane texture updated (brightness baked: ${params.backgroundImageEmissive})`);
 
@@ -788,7 +824,7 @@ function applyBackgroundAsHDRI() {
 		}
 
 		pathTracer.updateEnvironment();
-		pathTracer.reset();
+		resetPathTracerAndResumeIfAutoPaused();
 		return;
 
 	}
@@ -840,7 +876,7 @@ function applyBackgroundAsHDRI() {
 	scene.environmentIntensity = params.environmentIntensity;
 
 	pathTracer.updateEnvironment();
-	pathTracer.reset();
+	resetPathTracerAndResumeIfAutoPaused();
 
 	console.log( `✅ Background image converted to HDRI environment (${img.width}x${img.height} DataTexture)` );
 
@@ -852,7 +888,7 @@ function updateBackgroundHDRIIntensity() {
 
 	scene.environmentIntensity = params.environmentIntensity;
 	pathTracer.updateEnvironment();
-	pathTracer.reset();
+	resetPathTracerAndResumeIfAutoPaused();
 
 }
 
@@ -1017,7 +1053,7 @@ function buildGui() {
 
 					await pathTracer.setSceneAsync( scene, activeCamera );
 					pathTracer.updateCamera();
-					pathTracer.reset();
+					resetPathTracerAndResumeIfAutoPaused();
 
 				} catch (e) {
 
@@ -1053,7 +1089,7 @@ function buildGui() {
 
 				}
 				pathTracer.updateMaterials();
-				pathTracer.reset();
+				resetPathTracerAndResumeIfAutoPaused();
 
 			});
 
@@ -1124,7 +1160,7 @@ function buildGui() {
 			}
 			pathTracer.updateMaterials();
 			pathTracer.updateCamera();   // force the path tracer to recognise the new scene state
-			pathTracer.reset();
+			resetPathTracerAndResumeIfAutoPaused();
 
 		} );
 
@@ -1133,8 +1169,26 @@ function buildGui() {
 	}
 
 	const pathTracingFolder = gui.addFolder('Path Tracer');
-	pathTracingFolder.add(params, 'enable');
-	pathTracingFolder.add(params, 'pause');
+	enableController = pathTracingFolder.add(params, 'enable');
+	pathTracingFolder.add(params, 'pause').onChange(() => {
+
+		_autoPausedDueToSamples = false;
+
+	});
+	// When modal closes, re-enable path tracer checkbox so user can turn preview back on
+	if ( imageRenderModal ) imageRenderModal.onClose = () => {
+
+		params.enable = true;
+		if ( enableController ) enableController.disable( false );
+
+	};
+	// When user clicks Render, turn path tracer on immediately so canvas accumulates and we can capture
+	if ( imageRenderModal ) imageRenderModal.onBeforeRender = () => {
+
+		params.enable = true;
+		if ( enableController ) enableController.disable( false );
+
+	};
 	pathTracingFolder.add(params, 'multipleImportanceSampling').onChange(onParamsChange);
 	pathTracingFolder.add(params, 'acesToneMapping').onChange(v => {
 
@@ -1166,6 +1220,9 @@ function buildGui() {
 
 			if (imageRenderModal) {
 
+				// Disable path tracer while modal is open (reduce load until user clicks Render)
+				params.enable = false;
+				if ( enableController ) enableController.disable();
 				imageRenderModal.open();
 
 			}
@@ -1395,7 +1452,7 @@ function buildGui() {
 				});
 
 				pathTracer.updateMaterials();
-				pathTracer.reset();
+				resetPathTracerAndResumeIfAutoPaused();
 
 			}
 
@@ -2120,7 +2177,7 @@ async function updateWallpaperVisibility(selectedWallpaper) {
 			});
 			if (pathTracer) {
 				pathTracer.updateMaterials();
-				pathTracer.reset();
+				resetPathTracerAndResumeIfAutoPaused();
 			}
 		}
 
@@ -2359,7 +2416,7 @@ async function updateScreenTextureWithSettings() {
 
 	// Update path tracer
 	pathTracer.updateMaterials();
-	pathTracer.reset();
+	resetPathTracerAndResumeIfAutoPaused();
 
 	console.log(`✅ Screen texture updated successfully`);
 
@@ -2501,7 +2558,7 @@ async function handleImageUpload(file) {
 
 				// Reset rendering to see changes immediately
 				console.log(`   🔄 Resetting path tracer...`);
-				pathTracer.reset();
+				resetPathTracerAndResumeIfAutoPaused();
 
 				// Rebuild GUI to update the screen folder
 				console.log(`   🔄 Rebuilding GUI...`);
