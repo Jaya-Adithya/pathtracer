@@ -481,40 +481,26 @@ export class PhysicalPathTracingMaterial extends MaterialBase {
 
 						}
 
-						// Shadow / Reflection Catcher
-						// Renders only shadows and reflections on a transparent floor.
-						// Uses BSDF sampling so roughness & metalness affect reflection blur and intensity.
-						// Reflection weight uses scatterRec.color / scatterRec.pdf for energy-correct results.
-						// Shadow and reflection are independent alpha-premultiplied contributions.
+						// shadow/reflection catcher: only reflection (geometry) + shadow; no floor color, no env on floor
+						// Uses BSDF sampling so roughness/metalness controls affect the reflection
 						if ( material.shadowReflectionCatcher && state.firstRay ) {
 
 							vec3 hitPoint = stepRayOrigin( ray.origin, ray.direction, surf.faceNormal, surfaceHit.dist );
-
-							// ── 1. REFLECTION ──────────────────────────────────────────
+							// Roughness-aware reflection via BSDF instead of perfect mirror
 							ScatterRecord catcherScatter = bsdfSample( - ray.direction, surf );
 							vec3 reflDir = catcherScatter.direction;
-
-							// Ensure reflection goes above surface; fallback to perfect mirror
+							// Ensure reflection goes above surface
 							if ( dot( reflDir, surf.faceNormal ) < 0.0 ) {
 								reflDir = reflect( ray.direction, surf.faceNormal );
 							}
-
-							// Energy-correct BSDF weight (includes Fresnel, GGX distribution, geometric term)
-							vec3 reflWeight = catcherScatter.pdf > 0.0
-								? catcherScatter.color / catcherScatter.pdf
-								: vec3( 0.0 );
-
-							// Trace the reflected ray
 							Ray reflRay;
 							reflRay.origin = stepRayOrigin( hitPoint, reflDir, surf.faceNormal, 0.0 );
 							reflRay.direction = reflDir;
 							SurfaceHit reflHit;
 							int reflHitType = traceScene( reflRay, state.fogMaterial, reflHit );
-
 							vec3 reflectionColor = vec3( 0.0 );
 							if ( reflHitType == SURFACE_HIT ) {
 
-								// Reflected ray hit geometry — get its shaded color
 								uint reflMatIndex = uTexelFetch1D( materialIndexAttribute, reflHit.faceIndices.x ).r;
 								Material reflMat = readMaterialInfo( materials, reflMatIndex );
 								SurfaceRecord reflSurf;
@@ -525,23 +511,9 @@ export class PhysicalPathTracingMaterial extends MaterialBase {
 
 								}
 
-							} else {
-
-								// Reflected ray hit sky / environment map
-								reflectionColor = sampleBackground( reflDir, rand2( 12 ) );
-
 							}
-
-							// Apply BSDF weight to get final reflection contribution
-							vec3 weightedReflection = reflectionColor * reflWeight;
-
-							// ── 2. SHADOW ───────────────────────────────────────────────
-							// Shadow test: trace toward a random light source.
-							// shadowFactor = 1.0 means the point IS lit (no shadow).
-							// shadowFactor = 0.0 means the point is in shadow.
 							float shadowFactor = 0.0;
 							state.isShadowRay = true;
-
 							if ( lightsDenom != 0.0 && rand( 9 ) < float( lights.count ) / lightsDenom ) {
 
 								LightRecord lightRec = randomLightSample( lights.tex, iesProfiles, lights.count, hitPoint, rand3( 10 ) );
@@ -551,10 +523,7 @@ export class PhysicalPathTracingMaterial extends MaterialBase {
 									lightRay.origin = hitPoint;
 									lightRay.direction = lightRec.direction;
 									vec3 att;
-									// attenuateHit returns true if light reaches the point (NOT blocked)
-									if ( attenuateHit( state, lightRay, lightRec.dist, att ) ) {
-										shadowFactor = 1.0; // lit
-									}
+									if ( attenuateHit( state, lightRay, lightRec.dist, att ) ) shadowFactor = 1.0;
 
 								}
 
@@ -569,36 +538,37 @@ export class PhysicalPathTracingMaterial extends MaterialBase {
 									envRay.origin = hitPoint;
 									envRay.direction = envDirection;
 									vec3 att;
-									if ( attenuateHit( state, envRay, INFINITY, att ) ) {
-										shadowFactor = 1.0; // lit
-									}
+									if ( attenuateHit( state, envRay, INFINITY, att ) ) shadowFactor = 1.0;
 
 								}
 
 							}
+							// Shadow/Reflection Catcher Logic
+							// Simplified weight calculation to avoid heavy BSDF PDF computation.
+							// We approximate the reflection intensity using Fresnel.
 
-							state.isShadowRay = false;
+							state.isShadowRay = false; // We are tracing a reflection ray now
 
-							// ── 3. COMPOSITE ────────────────────────────────────────────
-							// Shadow contribution: darken where shadowed.
-							// shadowFactor=1 means lit (no shadow), shadowFactor=0 means in shadow.
-							// Shadow darkness is (1 - shadowFactor), i.e. how much the point is occluded.
-							float shadowDarkness = 1.0 - shadowFactor;
+							// Calculate approximate weight based on Fresnel
+							// This makes reflections stronger at grazing angles and respects base color for metals.
+							vec3 halfVector = normalize( - ray.direction + catcherScatter.direction );
+							float dotVH = saturate( dot( - ray.direction, halfVector ) );
 
-							// Reflection luminance for alpha
-							float reflLum = dot( weightedReflection, vec3( 0.2126, 0.7152, 0.0722 ) );
+							// Retrieve F0 from surface parameters
+							// Dialectric F0 is monochromatic (surf.f0), Metal F0 is colored (surf.color)
+							vec3 f0 = mix( vec3( surf.f0 * surf.specularIntensity ), surf.color, surf.metalness );
+							
+							// Compute Fresnel term
+							vec3 fresnel = schlickFresnel( dotVH, f0 );
 
-							// Alpha: combine shadow opacity + reflection opacity
-							// Shadow shows as darkening (alpha = shadowDarkness)
-							// Reflection adds its own alpha proportional to brightness
-							float reflAlpha = clamp( reflLum, 0.0, 1.0 );
-							float combinedAlpha = clamp( shadowDarkness + reflAlpha, 0.0, 1.0 );
+							// Apply Fresnel weight to reflection
+							// We effectively treat the geometric masking (G) as 1.0 for this approximation,
+							// relying on the scattered direction to provide the "blur" from roughness.
+							gl_FragColor.rgb = reflectionColor * fresnel * ( 1.0 - shadowFactor );
 
-							// Premultiplied alpha output:
-							// - Shadow: darkens the background by contributing alpha with no color
-							// - Reflection: adds bright color on top
-							gl_FragColor.rgb = weightedReflection;
-							gl_FragColor.a = combinedAlpha;
+							// 3. Compute alpha based on luminance of the FINAL weighted reflection
+							float refLum = dot( gl_FragColor.rgb, vec3( 0.2126, 0.7152, 0.0722 ) );
+							gl_FragColor.a = ( refLum > 0.01 || shadowFactor > 0.0 ) ? 1.0 : 0.0;
 							break;
 
 						}
