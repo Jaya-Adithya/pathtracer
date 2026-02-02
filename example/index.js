@@ -180,6 +180,10 @@ let mainAnimClip = null;
 const ANIMATION_FRAME_RATE = 30;
 const ANIMATION_MAX_FRAME = 150;
 
+// ── Product Color mesh groups (detected dynamically from GLB) ──
+let colorMeshGroups = {};      // { charcoal: { prefix, names[], hexCode } }
+let currentColorGroup = null;  // currently active color key
+
 const orthoWidth = 2;
 let contentGroup = null;
 
@@ -975,7 +979,7 @@ function buildGui() {
 	if (animationMixer && mainAnimAction && mainAnimClip) {
 
 		const animationFolder = gui.addFolder('Animation');
-		const maxFrame = Math.min(ANIMATION_MAX_FRAME, Math.floor((mainAnimClip.duration || 5) * ANIMATION_FRAME_RATE));
+		const maxFrame = Math.floor( ( mainAnimClip.duration || 5 ) * ANIMATION_FRAME_RATE );
 		animationFolder.add(params, 'animationFrame', 0, maxFrame, 1).name(`Frame (0–${maxFrame})`).onChange(async (frame) => {
 
 			const timeInSeconds = Math.min(frame / ANIMATION_FRAME_RATE, mainAnimClip.duration || 5);
@@ -1018,6 +1022,76 @@ function buildGui() {
 
 		}
 		animationFolder.open();
+
+	}
+
+	// ── Product Color controls (dynamic – only shown when GLB has productColor meshes) ──
+	const colorKeys = Object.keys( colorMeshGroups );
+	if ( colorKeys.length > 0 ) {
+
+		const colorFolder = gui.addFolder( 'Product Color' );
+
+		// Build a friendly label → key map for the dropdown
+		const colorLabels = {};
+		colorKeys.forEach( key => {
+
+			const grp = colorMeshGroups[ key ];
+			const label = grp.prefix.charAt( 0 ).toUpperCase() + grp.prefix.slice( 1 );
+			colorLabels[ label ] = key;
+
+		} );
+
+		params.productColor = currentColorGroup || colorKeys[ 0 ];
+
+		colorFolder.add( params, 'productColor', colorLabels ).name( 'Color' ).onChange( async ( key ) => {
+
+			// Hide all color meshes
+			Object.values( colorMeshGroups ).forEach( grp => {
+
+				grp.names.forEach( meshName => {
+
+					const m = model.getObjectByName( meshName );
+					if ( m ) m.visible = false;
+
+				} );
+
+			} );
+
+			// Show selected group
+			const selected = colorMeshGroups[ key ];
+			if ( selected ) {
+
+				selected.names.forEach( meshName => {
+
+					const m = model.getObjectByName( meshName );
+					if ( m ) m.visible = true;
+
+				} );
+
+			}
+			currentColorGroup = key;
+
+			// Immediate raster preview so the user sees the change while BVH rebuilds
+			renderer.render( scene, activeCamera );
+
+			// Rebuild path tracer BVH so the visibility change is reflected
+			scene.updateMatrixWorld( true );
+			try {
+
+				await pathTracer.setSceneAsync( scene, activeCamera );
+
+			} catch ( e ) {
+
+				console.error( 'Failed to update path tracer after color change', e );
+
+			}
+			pathTracer.updateMaterials();
+			pathTracer.updateCamera();   // force the path tracer to recognise the new scene state
+			pathTracer.reset();
+
+		} );
+
+		colorFolder.open();
 
 	}
 
@@ -2560,6 +2634,62 @@ async function updateModel() {
 
 	contentGroup.add(model);
 
+	// 0. Detect productColor meshes and group them (like GLBViewer reference)
+	colorMeshGroups = {};
+	currentColorGroup = null;
+	{
+
+		const productColorMatcher = /^productColor_([A-Za-z0-9]+?)(\d*)_([a-f0-9]{6})$/i;
+		const allColorMeshes = [];
+
+		model.traverse( ( obj ) => {
+
+			if ( ! obj || ! obj.isMesh || ! obj.name ) return;
+			const match = obj.name.match( productColorMatcher );
+			if ( match ) {
+
+				const colorName = match[ 1 ];
+				const hexCode = match[ 3 ];
+				obj.visible = false; // hide all color meshes initially
+				allColorMeshes.push( { mesh: obj, name: obj.name, colorName, hexCode } );
+
+			}
+
+		} );
+
+		// Group by base color name (strip trailing digits)
+		const groupsByName = {};
+		allColorMeshes.forEach( item => {
+
+			const key = item.colorName.toLowerCase().replace( /\d+$/, '' );
+			if ( ! groupsByName[ key ] ) {
+
+				groupsByName[ key ] = { prefix: item.colorName.replace( /\d+$/, '' ), names: [], hexCode: item.hexCode };
+
+			}
+			groupsByName[ key ].names.push( item.name );
+
+		} );
+
+		colorMeshGroups = groupsByName;
+
+		// Show the first color group as default
+		const keys = Object.keys( colorMeshGroups );
+		if ( keys.length > 0 ) {
+
+			currentColorGroup = keys[ 0 ];
+			colorMeshGroups[ keys[ 0 ] ].names.forEach( meshName => {
+
+				const m = model.getObjectByName( meshName );
+				if ( m ) m.visible = true;
+
+			} );
+			console.log( `🎨 Product colors detected: ${ keys.join( ', ' ) }. Default: ${ keys[ 0 ] }` );
+
+		}
+
+	}
+
 	// 1. Find all wallpaper meshes BEFORE building the path tracer scene
 	wallpaperMeshes = findAllWallpaperMeshes(model);
 	console.log('📋 Found wallpapers:', Object.keys(wallpaperMeshes).filter(key => wallpaperMeshes[key] !== null));
@@ -2650,7 +2780,7 @@ async function updateModel() {
 		mainAnimAction.paused = true;
 		const timeInSeconds = Math.min(params.animationFrame / ANIMATION_FRAME_RATE, mainClip.duration || 5);
 		mainAnimAction.time = timeInSeconds;
-		params.animationFrame = Math.min(Math.round(timeInSeconds * ANIMATION_FRAME_RATE), ANIMATION_MAX_FRAME);
+		params.animationFrame = Math.round( timeInSeconds * ANIMATION_FRAME_RATE );
 		animationMixer.update(0);
 
 	}
