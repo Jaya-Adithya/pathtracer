@@ -29,6 +29,7 @@ import {
 	DataTexture,
 	FloatType,
 	RGBAFormat,
+	Euler,
 } from 'three';
 import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js';
 import { HDRLoader } from 'three/examples/jsm/loaders/HDRLoader.js';
@@ -87,6 +88,8 @@ const envMaps = {
 	'Christmas Photo Studio 07': 'https://raw.githubusercontent.com/gkjohnson/3d-demo-data/master/hdri/christmas_photo_studio_07_2k.hdr',
 	'Aerodynamics Workshop': 'https://raw.githubusercontent.com/gkjohnson/3d-demo-data/master/hdri/aerodynamics_workshop_1k.hdr',
 
+	'Custom HDRI': '__CUSTOM__',
+
 };
 
 const params = {
@@ -124,7 +127,7 @@ const params = {
 	bounces: 5,
 	filterGlossyFactor: 0.1,
 	pause: false,
-	previewSamplesMax: 1000,  // cap preview accumulation – final render uses its own target
+	previewSamplesMax: 100,  // cap preview accumulation – final render uses its own target
 
 	floorMode: 'Shadow Catcher',  // 'Solid Ground' | 'Shadow Catcher'
 	floorColor: '#111111',
@@ -170,6 +173,9 @@ let imageRenderModal = null; // Image render modal instance
 // Pause state: distinguish user-paused vs auto-paused (reached target samples)
 let _autoPausedDueToSamples = false;
 let enableController = null; // GUI controller for params.enable (Path Tracer checkbox)
+// Environment rotation slider: pause path tracer while dragging so rotation is visible in raster view
+let _envRotationDragging = false;
+let _envRotPrevEnable = null;
 
 // Background image state (CSS overlay behind canvas + HDRI conversion)
 let backgroundOverlay = null; // CSS <img> element behind the canvas
@@ -181,6 +187,7 @@ let backgroundImageNaturalWidth = 0;
 let backgroundImageNaturalHeight = 0;
 let backgroundHDRITexture = null; // PMREM-converted environment texture from background image
 let previousEnvironment = null; // Store original environment before HDRI override
+let customEnvTexture = null; // User-loaded HDRI for "Custom HDRI" option
 let animationMixer = null;
 let mainAnimAction = null;
 let mainAnimClip = null;
@@ -409,34 +416,14 @@ function resetPathTracerAndResumeIfAutoPaused() {
 
 }
 
-function onParamsChange() {
-
-	pathTracer.multipleImportanceSampling = params.multipleImportanceSampling;
-	pathTracer.bounces = params.bounces;
-	pathTracer.filterGlossyFactor = params.filterGlossyFactor;
-	pathTracer.renderScale = params.renderScale;
-
-	floorPlane.material.color.set(params.floorColor);
-	floorPlane.material.roughness = params.floorRoughness;
-	floorPlane.material.metalness = params.floorMetalness;
-	floorPlane.material.opacity = params.floorOpacity;
-	floorPlane.material.transmission = params.floorTransmission;
-	floorPlane.material.ior = params.floorIOR;
-	floorPlane.material.shadowReflectionCatcher = params.floorShadowReflectionCatcher;
+// Sync only scene environment/background from params (no path tracer calls).
+// Use during rotation drag so raster view shows exact intensity, saturation, rotation, background.
+function syncSceneEnvironmentFromParams() {
 
 	scene.environmentIntensity = params.environmentIntensity;
 	scene.environmentRotation.y = params.environmentRotation;
 	scene.userData.environmentSaturation = params.environmentSaturation;
 	scene.backgroundBlurriness = params.backgroundBlur;
-
-	if ( params.focalLength != null && params.focalLength > 0 ) {
-
-		const filmHeight = 24;
-		perspectiveCamera.fov = MathUtils.radToDeg( 2 * Math.atan( ( filmHeight / 2 ) / params.focalLength ) );
-		perspectiveCamera.updateProjectionMatrix();
-		pathTracer.updateCamera();
-
-	}
 
 	if (params.backgroundType === 'Gradient') {
 
@@ -447,7 +434,6 @@ function onParamsChange() {
 		scene.background = gradientMap;
 		scene.backgroundIntensity = 1;
 
-		// Only zero out env rotation for gradient if NOT using BG-as-HDRI
 		if (!params.backgroundAsHDRI) {
 
 			scene.environmentRotation.y = 0;
@@ -464,11 +450,86 @@ function onParamsChange() {
 
 	if (params.transparentBackground || params.backgroundImageEnabled) {
 
-		// Background image is displayed via CSS overlay behind the canvas.
-		// Set scene.background = null so canvas is transparent and CSS shows through.
-		// During capture, ImageRenderModal sets scene.background temporarily.
 		scene.background = null;
 		renderer.setClearAlpha(0);
+
+	}
+
+	// Sync material envMapRotation for rasterizer view
+	// Three.js materials have their own envMapRotation that needs to be updated
+	// separately from scene.environmentRotation for the WebGL renderer to show
+	// rotated reflections on materials during live preview
+	syncMaterialEnvMapRotation();
+
+}
+
+// Sync the environment rotation to all materials in the scene
+// This is needed because Three.js WebGLRenderer uses material.envMapRotation
+// for reflection sampling, which is separate from scene.environmentRotation
+function syncMaterialEnvMapRotation() {
+
+	if (!model) return;
+
+	const rotationY = params.backgroundAsHDRI || params.backgroundType !== 'Gradient'
+		? params.environmentRotation
+		: 0;
+
+	// Create an Euler with the rotation
+	const envRotation = new Euler(0, rotationY, 0);
+
+	// Update all materials in the model
+	model.traverse((child) => {
+
+		if (child.isMesh && child.material) {
+
+			const materials = Array.isArray(child.material) ? child.material : [child.material];
+			materials.forEach((material) => {
+
+				// MeshStandardMaterial and MeshPhysicalMaterial have envMapRotation
+				if (material.envMapRotation) {
+
+					material.envMapRotation.copy(envRotation);
+
+				}
+
+			});
+
+		}
+
+	});
+
+	// Also update floor plane material
+	if (floorPlane && floorPlane.material && floorPlane.material.envMapRotation) {
+
+		floorPlane.material.envMapRotation.copy(envRotation);
+
+	}
+
+}
+
+function onParamsChange() {
+
+	pathTracer.multipleImportanceSampling = params.multipleImportanceSampling;
+	pathTracer.bounces = params.bounces;
+	pathTracer.filterGlossyFactor = params.filterGlossyFactor;
+	pathTracer.renderScale = params.renderScale;
+
+	floorPlane.material.color.set(params.floorColor);
+	floorPlane.material.roughness = params.floorRoughness;
+	floorPlane.material.metalness = params.floorMetalness;
+	floorPlane.material.opacity = params.floorOpacity;
+	floorPlane.material.transmission = params.floorTransmission;
+	floorPlane.material.ior = params.floorIOR;
+	floorPlane.material.shadowReflectionCatcher = params.floorShadowReflectionCatcher;
+
+	syncSceneEnvironmentFromParams();
+
+	if ( params.focalLength != null && params.focalLength > 0 ) {
+
+		const filmHeight = 24;
+		perspectiveCamera.fov = MathUtils.radToDeg( 2 * Math.atan( ( filmHeight / 2 ) / params.focalLength ) );
+		perspectiveCamera.updateProjectionMatrix();
+		pathTracer.updateCamera();
 
 	}
 
@@ -1250,8 +1311,30 @@ function buildGui() {
 
 	const environmentFolder = gui.addFolder('environment');
 	environmentFolder.add(params, 'envMap', envMaps).name('map').onChange(updateEnvMap);
+	environmentFolder.add({ loadCustomHDRI }, 'loadCustomHDRI').name('Load Custom HDRI');
 	environmentFolder.add(params, 'environmentIntensity', 0.0, 10.0).onChange(onParamsChange).name('intensity');
-	environmentFolder.add(params, 'environmentRotation', 0, 2 * Math.PI).onChange(onParamsChange);
+	environmentFolder.add(params, 'environmentRotation', 0, 2 * Math.PI)
+		.name('rotation')
+		.onChange(() => {
+			// While dragging: pause path tracer and show HDRI rotation live in raster view
+			if (!_envRotationDragging) {
+				_envRotationDragging = true;
+				_envRotPrevEnable = params.enable;
+				params.enable = false;
+			}
+			syncSceneEnvironmentFromParams();
+			// During rotation drag always show HDRI as background so user sees it rotate (even when backgroundType is Gradient)
+			if (!params.transparentBackground && !params.backgroundImageEnabled && scene.environment) {
+				scene.background = scene.environment;
+				scene.backgroundIntensity = params.environmentIntensity;
+				scene.backgroundRotation.y = params.environmentRotation;
+			}
+		})
+		.onFinishChange(() => {
+			_envRotationDragging = false;
+			onParamsChange();
+			params.enable = _envRotPrevEnable ?? true;
+		});
 	environmentFolder.add(params, 'environmentSaturation', 0, 2).onChange(onParamsChange).name('HDRI saturation');
 
 	// Use background image as environment lighting (PMREM conversion)
@@ -1526,11 +1609,30 @@ function buildGui() {
 
 function updateEnvMap() {
 
+	if ( params.envMap === '__CUSTOM__' ) {
+
+		if ( customEnvTexture ) {
+
+			if ( scene.environment !== customEnvTexture ) {
+
+				if ( scene.environment ) scene.environment.dispose();
+				scene.environment = customEnvTexture;
+				pathTracer.updateEnvironment();
+				onParamsChange();
+
+			}
+
+		}
+		return;
+
+	}
+
 	new HDRLoader()
 		.load(params.envMap, texture => {
 
-			if (scene.environment) {
+			if ( scene.environment ) {
 
+				if ( scene.environment === customEnvTexture ) customEnvTexture = null;
 				scene.environment.dispose();
 
 			}
@@ -1541,6 +1643,45 @@ function updateEnvMap() {
 			onParamsChange();
 
 		});
+
+}
+
+function loadCustomHDRI() {
+
+	const fileInput = document.createElement('input');
+	fileInput.type = 'file';
+	fileInput.accept = '.hdr,.hrd';
+	fileInput.style.display = 'none';
+	fileInput.addEventListener('change', (e) => {
+
+		const file = e.target.files && e.target.files[0];
+		if ( !file ) return;
+
+		const url = URL.createObjectURL(file);
+		new HDRLoader().load(url, (texture) => {
+
+			URL.revokeObjectURL(url);
+
+			if ( customEnvTexture ) customEnvTexture.dispose();
+			customEnvTexture = texture;
+			customEnvTexture.mapping = EquirectangularReflectionMapping;
+
+			if ( scene.environment && scene.environment !== customEnvTexture ) scene.environment.dispose();
+			scene.environment = customEnvTexture;
+			pathTracer.updateEnvironment();
+
+			params.envMap = '__CUSTOM__';
+			onParamsChange();
+
+		}, undefined, (err) => {
+
+			URL.revokeObjectURL(url);
+			console.error('Custom HDRI load failed:', err);
+
+		});
+
+	});
+	fileInput.click();
 
 }
 
