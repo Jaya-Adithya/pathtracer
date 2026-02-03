@@ -1,4 +1,21 @@
-import { PerspectiveCamera, Scene, Vector2, Clock, NormalBlending, NoBlending, AdditiveBlending } from 'three';
+import {
+	PerspectiveCamera,
+	Scene,
+	Vector2,
+	Clock,
+	NormalBlending,
+	NoBlending,
+	AdditiveBlending,
+	DataTexture,
+	DataUtils,
+	FloatType,
+	HalfFloatType,
+	RGBAFormat,
+	EquirectangularReflectionMapping,
+	RepeatWrapping,
+	ClampToEdgeWrapping,
+	LinearFilter
+} from 'three';
 import { PathTracingSceneGenerator } from './PathTracingSceneGenerator.js';
 import { PathTracingRenderer } from './PathTracingRenderer.js';
 import { FullScreenQuad } from 'three/examples/jsm/postprocessing/Pass.js';
@@ -124,6 +141,8 @@ export class WebGLPathTracer {
 		this._previousEnvironment = null;
 		this._previousBackground = null;
 		this._internalBackground = null;
+		this._rasterEnvMap = null; // FloatType copy for scene.environment (raster PBR)
+		this._previousRasterEnvMapSource = null;
 
 		// options
 		this.renderDelay = 100;
@@ -331,6 +350,55 @@ export class WebGLPathTracer {
 
 		}
 
+		// Use sanitized env map for raster view so Infinity/NaN in raw HDR don't cause black materials.
+		// Raster PBR (WebGLRenderer) often fails with HalfFloatType env maps; use a FloatType copy.
+		const sanitizedMap = material.envMapInfo.map;
+		if ( scene.environment !== null && sanitizedMap ) {
+
+			if ( sanitizedMap.type === HalfFloatType ) {
+
+				// Reuse or create FloatType copy for raster view
+				if ( this._previousRasterEnvMapSource !== sanitizedMap && this._rasterEnvMap ) {
+
+					this._rasterEnvMap.dispose();
+					this._rasterEnvMap = null;
+
+				}
+				if ( ! this._rasterEnvMap ) {
+
+					const { width, height, data } = sanitizedMap.image;
+					const stride = Math.floor( data.length / ( width * height ) );
+					const floatData = new Float32Array( width * height * 4 );
+					for ( let i = 0; i < width * height; i ++ ) {
+
+						floatData[ 4 * i + 0 ] = DataUtils.fromHalfFloat( data[ stride * i + 0 ] );
+						floatData[ 4 * i + 1 ] = DataUtils.fromHalfFloat( data[ stride * i + 1 ] );
+						floatData[ 4 * i + 2 ] = DataUtils.fromHalfFloat( data[ stride * i + 2 ] );
+						floatData[ 4 * i + 3 ] = stride >= 4 ? DataUtils.fromHalfFloat( data[ stride * i + 3 ] ) : 1.0;
+
+					}
+					this._rasterEnvMap = new DataTexture( floatData, width, height, RGBAFormat, FloatType, EquirectangularReflectionMapping, RepeatWrapping, ClampToEdgeWrapping, LinearFilter, LinearFilter );
+					this._rasterEnvMap.needsUpdate = true;
+					this._previousRasterEnvMapSource = sanitizedMap;
+
+				}
+				scene.environment = this._rasterEnvMap;
+
+			} else {
+
+				if ( this._rasterEnvMap ) {
+
+					this._rasterEnvMap.dispose();
+					this._rasterEnvMap = null;
+					this._previousRasterEnvMapSource = null;
+
+				}
+				scene.environment = sanitizedMap;
+
+			}
+
+		}
+
 		this._previousEnvironment = scene.environment;
 		this._previousBackground = scene.background;
 		this.reset();
@@ -496,6 +564,13 @@ export class WebGLPathTracer {
 
 	dispose() {
 
+		if ( this._rasterEnvMap ) {
+
+			this._rasterEnvMap.dispose();
+			this._rasterEnvMap = null;
+			this._previousRasterEnvMapSource = null;
+
+		}
 		this._quad.dispose();
 		this._quad.material.dispose();
 		this._pathTracer.dispose();

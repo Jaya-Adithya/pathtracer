@@ -132,6 +132,7 @@ const params = {
 	floorMode: 'Shadow Catcher',  // 'Solid Ground' | 'Shadow Catcher'
 	floorColor: '#111111',
 	floorOpacity: 1.0,
+	floorShadowOpacity: 0.5,  // Shadow Catcher only: intensity of shadow on ground (0–2)
 	floorRoughness: 0.2,
 	floorMetalness: 0.2,
 	floorTransmission: 0.0,
@@ -188,6 +189,7 @@ let backgroundImageNaturalHeight = 0;
 let backgroundHDRITexture = null; // PMREM-converted environment texture from background image
 let previousEnvironment = null; // Store original environment before HDRI override
 let customEnvTexture = null; // User-loaded HDRI for "Custom HDRI" option
+let fallbackEnvMap = null; // Bright fallback environment used until HDRI loads (don't dispose)
 let animationMixer = null;
 let mainAnimAction = null;
 let mainAnimClip = null;
@@ -228,6 +230,8 @@ async function init() {
 	// renderer — alpha + premultipliedAlpha:false so CSS background shows through
 	renderer = new WebGLRenderer({ antialias: true, alpha: true, premultipliedAlpha: false, preserveDrawingBuffer: true });
 	renderer.toneMapping = ACESFilmicToneMapping;
+	renderer.toneMappingExposure = 1.0;
+	renderer.outputColorSpace = SRGBColorSpace;
 
 	// Wrap canvas + CSS background overlay in a container (like StudioX)
 	const canvasContainer = document.createElement('div');
@@ -255,6 +259,25 @@ async function init() {
 	pathTracer.multipleImportanceSampling = params.multipleImportanceSampling;
 	pathTracer.transmissiveBounces = 10;
 	pathTracer.minSamples = 1;
+
+	// Override rasterizeSceneCallback to ensure environment is always set for raster fallback
+	pathTracer.rasterizeSceneCallback = (s, c) => {
+
+		// Ensure environment is set before raster render (fallback if null)
+		if (!s.environment && fallbackEnvMap) {
+
+			s.environment = fallbackEnvMap;
+
+		}
+		// Ensure environment intensity is always positive for visible lighting
+		if (s.environmentIntensity === undefined || s.environmentIntensity <= 0) {
+
+			s.environmentIntensity = params.environmentIntensity || 1.0;
+
+		}
+		renderer.render(s, c);
+
+	};
 
 	// camera
 	const aspect = window.innerWidth / window.innerHeight;
@@ -298,6 +321,15 @@ async function init() {
 	// scene
 	scene = new Scene();
 	scene.background = gradientMap;
+	// Create a bright fallback environment (white/grey gradient) so raster view has lighting until HDRI loads
+	// gradientMap is too dark (#111111/#000000) to provide meaningful lighting
+	fallbackEnvMap = new GradientEquirectTexture();
+	fallbackEnvMap.topColor.set('#ffffff');
+	fallbackEnvMap.bottomColor.set('#cccccc');
+	fallbackEnvMap.update();
+	scene.environment = fallbackEnvMap;
+	// Use higher intensity for the fallback to ensure visible lighting
+	scene.environmentIntensity = Math.max(params.environmentIntensity, 1.0);
 	// Add cameras to scene so camera-attached background plane is included in path tracing
 	scene.add(perspectiveCamera);
 	scene.add(orthoCamera);
@@ -396,6 +428,12 @@ function animate() {
 
 	} else {
 
+		// Ensure scene.environment is always set for raster view (fallback if null)
+		if ( !scene.environment && fallbackEnvMap ) {
+
+			scene.environment = fallbackEnvMap;
+
+		}
 		renderer.render(scene, activeCamera);
 
 	}
@@ -513,7 +551,7 @@ function onParamsChange() {
 	floorPlane.material.color.set(params.floorColor);
 	floorPlane.material.roughness = params.floorRoughness;
 	floorPlane.material.metalness = params.floorMetalness;
-	floorPlane.material.opacity = params.floorOpacity;
+	floorPlane.material.opacity = params.floorShadowReflectionCatcher ? Math.min( 1, params.floorShadowOpacity ) : params.floorOpacity;
 	floorPlane.material.transmission = params.floorTransmission;
 	floorPlane.material.ior = params.floorIOR;
 	floorPlane.material.shadowReflectionCatcher = params.floorShadowReflectionCatcher;
@@ -1448,6 +1486,9 @@ function buildGui() {
 	solidControls.push( floorFolder.add( params, 'floorTransmission', 0, 1 ).name( 'Transmission' ).onChange( onParamsChange ) );
 	solidControls.push( floorFolder.add( params, 'floorIOR', 1.0, 2.0, 0.01 ).name( 'IOR' ).onChange( onParamsChange ) );
 
+	// Shadow Catcher–only: shadow opacity (intensity of shadow on ground)
+	const shadowOpacityCtrl = floorFolder.add( params, 'floorShadowOpacity', 0, 2 ).onChange( onParamsChange ).name( 'Shadow opacity' );
+
 	// Shared controls (visible in both modes)
 	floorFolder.add( params, 'floorRoughness', 0, 1 ).onChange( onParamsChange );
 	floorFolder.add( params, 'floorMetalness', 0, 1 ).onChange( onParamsChange );
@@ -1463,11 +1504,13 @@ function buildGui() {
 			ctrl.domElement.style.display = isCatcher ? 'none' : '';
 
 		} );
+		// Show shadow opacity only in Shadow Catcher mode
+		shadowOpacityCtrl.domElement.style.display = isCatcher ? '' : 'none';
 
-		// In catcher mode make raster fallback floor semi-transparent so it doesn't flash solid
+		// In catcher mode use shadow opacity for floor (raster + path tracer; clamp to 1 for material)
 		if ( isCatcher ) {
 
-			floorPlane.material.opacity = 0.15;
+			floorPlane.material.opacity = Math.min( 1, params.floorShadowOpacity );
 			floorPlane.material.transparent = true;
 
 		} else {
@@ -1614,7 +1657,11 @@ function updateEnvMap() {
 
 			if ( scene.environment !== customEnvTexture ) {
 
-				if ( scene.environment ) scene.environment.dispose();
+				if ( scene.environment && scene.environment !== gradientMap && scene.environment !== fallbackEnvMap ) {
+
+					scene.environment.dispose();
+
+				}
 				scene.environment = customEnvTexture;
 				pathTracer.updateEnvironment();
 				onParamsChange();
@@ -1627,17 +1674,28 @@ function updateEnvMap() {
 
 	}
 
+	// Store previous environment so we don't lose it during async load (prevents black raster fallback)
+	// Don't dispose until new HDRI is successfully loaded - keeps raster fallback lit during load
+	const previousEnvDuringLoad = scene.environment;
+
 	new HDRLoader()
 		.load(params.envMap, (texture) => {
 
-			if ( scene.environment ) {
+			// Dispose old environment only after new one is successfully loaded
+			// Don't dispose gradientMap/fallbackEnvMap (reusable) or customEnvTexture (handled separately)
+			if ( previousEnvDuringLoad && previousEnvDuringLoad !== texture && previousEnvDuringLoad !== gradientMap && previousEnvDuringLoad !== fallbackEnvMap ) {
 
-				if ( scene.environment === customEnvTexture ) customEnvTexture = null;
-				scene.environment.dispose();
+				if ( previousEnvDuringLoad === customEnvTexture ) customEnvTexture = null;
+				previousEnvDuringLoad.dispose();
 
 			}
 
 			texture.mapping = EquirectangularReflectionMapping;
+			// Ensure optimal settings for Raster view (prevents black texture on NPOT)
+			texture.minFilter = LinearFilter;
+			texture.magFilter = LinearFilter;
+			texture.generateMipmaps = false;
+
 			scene.environment = texture;
 			pathTracer.updateEnvironment();
 			onParamsChange();
@@ -1645,6 +1703,12 @@ function updateEnvMap() {
 		}, undefined, (err) => {
 
 			console.warn('HDRI preset load failed, keeping current environment:', params.envMap, err);
+			// On error: ensure scene.environment is never null (use previous if current was cleared)
+			if ( !scene.environment && previousEnvDuringLoad ) {
+
+				scene.environment = previousEnvDuringLoad;
+
+			}
 			pathTracer.updateEnvironment();
 
 		});
@@ -1670,8 +1734,17 @@ function loadCustomHDRI() {
 			if ( customEnvTexture ) customEnvTexture.dispose();
 			customEnvTexture = texture;
 			customEnvTexture.mapping = EquirectangularReflectionMapping;
+			// Ensure optimal settings for Raster view
+			customEnvTexture.minFilter = LinearFilter;
+			customEnvTexture.magFilter = LinearFilter;
+			customEnvTexture.generateMipmaps = false;
 
-			if ( scene.environment && scene.environment !== customEnvTexture ) scene.environment.dispose();
+			// Don't dispose reusable environments (gradientMap, fallbackEnvMap)
+			if ( scene.environment && scene.environment !== customEnvTexture && scene.environment !== gradientMap && scene.environment !== fallbackEnvMap ) {
+
+				scene.environment.dispose();
+
+			}
 			scene.environment = customEnvTexture;
 			pathTracer.updateEnvironment();
 
@@ -2881,6 +2954,14 @@ async function updateModel() {
 
 			// set the thickness so we render the material as a volumetric object
 			c.material.thickness = 1.0;
+
+			// Ensure materials can respond to scene.environment for raster view
+			// envMapIntensity controls how much the environment affects the material (default 1)
+			if (c.material.envMapIntensity === undefined || c.material.envMapIntensity === 0) {
+
+				c.material.envMapIntensity = 1.0;
+
+			}
 
 		}
 
