@@ -434,11 +434,7 @@ function syncSceneEnvironmentFromParams() {
 		scene.background = gradientMap;
 		scene.backgroundIntensity = 1;
 
-		if (!params.backgroundAsHDRI) {
-
-			scene.environmentRotation.y = 0;
-
-		}
+		// Keep scene.environmentRotation from params so path tracer matches raster view (no zeroing)
 
 	} else {
 
@@ -470,9 +466,8 @@ function syncMaterialEnvMapRotation() {
 
 	if (!model) return;
 
-	const rotationY = params.backgroundAsHDRI || params.backgroundType !== 'Gradient'
-		? params.environmentRotation
-		: 0;
+	// Always use slider rotation so raster and path tracer show the same HDRI orientation
+	const rotationY = params.environmentRotation;
 
 	// Create an Euler with the rotation
 	const envRotation = new Euler(0, rotationY, 0);
