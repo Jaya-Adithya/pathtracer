@@ -254,6 +254,7 @@ async function init() {
 	pathTracer.tiles.set(params.tiles, params.tiles);
 	pathTracer.multipleImportanceSampling = params.multipleImportanceSampling;
 	pathTracer.transmissiveBounces = 10;
+	pathTracer.minSamples = 1;
 
 	// camera
 	const aspect = window.innerWidth / window.innerHeight;
@@ -417,6 +418,7 @@ function resetPathTracerAndResumeIfAutoPaused() {
 }
 
 // Sync only scene environment/background from params (no path tracer calls).
+// Applies to any HDRI source: preset env maps, Custom HDRI, or BG Image as HDRI.
 // Use during rotation drag so raster view shows exact intensity, saturation, rotation, background.
 function syncSceneEnvironmentFromParams() {
 
@@ -459,14 +461,13 @@ function syncSceneEnvironmentFromParams() {
 
 }
 
-// Sync the environment rotation to all materials in the scene
-// This is needed because Three.js WebGLRenderer uses material.envMapRotation
-// for reflection sampling, which is separate from scene.environmentRotation
+// Sync the environment rotation to all materials in the scene (preset, custom, or BG-as-HDRI).
+// Three.js WebGLRenderer uses material.envMapRotation for reflection sampling.
 function syncMaterialEnvMapRotation() {
 
 	if (!model) return;
 
-	// Always use slider rotation so raster and path tracer show the same HDRI orientation
+	// Same rotation for all HDRI sources so raster and path tracer match
 	const rotationY = params.environmentRotation;
 
 	// Create an Euler with the rotation
@@ -867,11 +868,10 @@ function applyBackgroundAsHDRI() {
 
 	if ( !backgroundImageOriginal || !params.backgroundAsHDRI ) {
 
-		// Disable: restore original environment
+		// Disable: restore original environment (preset or custom HDRI)
 		if ( previousEnvironment !== null ) {
 
 			scene.environment = previousEnvironment;
-			scene.environmentIntensity = params.environmentIntensity;
 			previousEnvironment = null;
 
 		}
@@ -883,6 +883,8 @@ function applyBackgroundAsHDRI() {
 
 		}
 
+		// Re-apply rotation/intensity/saturation to restored env so all HDRI sources behave the same
+		syncSceneEnvironmentFromParams();
 		pathTracer.updateEnvironment();
 		resetPathTracerAndResumeIfAutoPaused();
 		return;
@@ -933,7 +935,8 @@ function applyBackgroundAsHDRI() {
 
 	// Apply as environment lighting (does NOT affect the CSS background overlay)
 	scene.environment = envDataTexture;
-	scene.environmentIntensity = params.environmentIntensity;
+	// Apply rotation/intensity/saturation so BG-as-HDRI matches preset/custom behavior
+	syncSceneEnvironmentFromParams();
 
 	pathTracer.updateEnvironment();
 	resetPathTracerAndResumeIfAutoPaused();
@@ -1318,7 +1321,7 @@ function buildGui() {
 				params.enable = false;
 			}
 			syncSceneEnvironmentFromParams();
-			// During rotation drag always show HDRI as background so user sees it rotate (even when backgroundType is Gradient)
+			// During rotation drag show current HDRI as background (preset, custom, or BG-as-HDRI) so user sees it rotate
 			if (!params.transparentBackground && !params.backgroundImageEnabled && scene.environment) {
 				scene.background = scene.environment;
 				scene.backgroundIntensity = params.environmentIntensity;
@@ -1606,6 +1609,7 @@ function updateEnvMap() {
 
 	if ( params.envMap === '__CUSTOM__' ) {
 
+		// Custom HDRI: apply same rotation/intensity/saturation as preset/BG-as-HDRI
 		if ( customEnvTexture ) {
 
 			if ( scene.environment !== customEnvTexture ) {
@@ -1618,12 +1622,13 @@ function updateEnvMap() {
 			}
 
 		}
+		// If Custom selected but no file loaded yet, keep current scene.environment so raster view still has light
 		return;
 
 	}
 
 	new HDRLoader()
-		.load(params.envMap, texture => {
+		.load(params.envMap, (texture) => {
 
 			if ( scene.environment ) {
 
@@ -1636,6 +1641,11 @@ function updateEnvMap() {
 			scene.environment = texture;
 			pathTracer.updateEnvironment();
 			onParamsChange();
+
+		}, undefined, (err) => {
+
+			console.warn('HDRI preset load failed, keeping current environment:', params.envMap, err);
+			pathTracer.updateEnvironment();
 
 		});
 
@@ -1666,6 +1676,7 @@ function loadCustomHDRI() {
 			pathTracer.updateEnvironment();
 
 			params.envMap = '__CUSTOM__';
+			// Full sync so custom HDRI gets same rotation/intensity/saturation as any other source
 			onParamsChange();
 
 		}, undefined, (err) => {
