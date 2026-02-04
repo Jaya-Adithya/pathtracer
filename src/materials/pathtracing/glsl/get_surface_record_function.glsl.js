@@ -53,12 +53,11 @@ export const get_surface_record_function = /* glsl */`
 
 		}
 
-		// possibly skip this sample if it's transparent, alpha test is enabled, or we hit the wrong material side
-		// and it's single sided.
-		// - alpha test is disabled when it === 0
-		// - the material sidedness test is complicated because we want light to pass through the back side but still
-		// be able to see the front side. This boolean checks if the side we hit is the front side on the first ray
-		// and we're rendering the other then we skip it. Do the opposite on subsequent bounces to get incoming light.
+		// Hit flag: SKIP_SURFACE = continue ray (transparent); HIT_SURFACE = shade. Solid ground uses hit-flag + alpha
+		// (alpha test or stochastic alpha for PNG transparency) + transmission (refraction/tint in attenuateHit).
+		// Possibly skip if transparent, alpha test enabled, or wrong material side (single sided).
+		// - alpha test disabled when === 0; stochastic alpha: material.transparent && albedo.a < rand(3).
+		// - material sidedness: allow light through back side but still shade front; skip wrong side on first ray.
 		float alphaTest = material.alphaTest;
 		bool useAlphaTest = alphaTest != 0.0;
 		if (

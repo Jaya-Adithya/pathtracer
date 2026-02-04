@@ -246,22 +246,32 @@ export class PathTracingRenderer {
 			} ),
 		];
 
-		// function for listening to for triggered compilation so we can wait for compilation to finish
-		// before starting to render
+		// Debounced compile: wait one frame so multiple define/param changes in one burst cause a single compile.
+		// Reduces GPU exhaustion when toggling options or loading scenes.
+		this._compileScheduled = false;
 		this._compileFunction = () => {
 
-			const promise = this.compileMaterial( this._fsQuad._mesh );
-			promise.then( () => {
+			if ( this._compileScheduled ) return;
+			this._compileScheduled = true;
 
-				if ( this._compilePromise === promise ) {
+			const self = this;
+			requestAnimationFrame( function doCompile() {
 
-					this._compilePromise = null;
+				self._compileScheduled = false;
+				const promise = self.compileMaterial( self._fsQuad._mesh );
+				promise.then( () => {
 
-				}
+					if ( self._compilePromise === promise ) {
+
+						self._compilePromise = null;
+
+					}
+
+				} );
+
+				self._compilePromise = promise;
 
 			} );
-
-			this._compilePromise = promise;
 
 		};
 
@@ -342,6 +352,8 @@ export class PathTracingRenderer {
 		this._fsQuad.dispose();
 		this._blendQuad.dispose();
 		this._task = null;
+		this._compilePromise = null;
+		this._compileScheduled = false;
 
 	}
 

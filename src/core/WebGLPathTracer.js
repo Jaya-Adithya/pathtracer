@@ -143,6 +143,7 @@ export class WebGLPathTracer {
 		this._internalBackground = null;
 		this._rasterEnvMap = null; // FloatType copy for scene.environment (raster PBR)
 		this._previousRasterEnvMapSource = null;
+		this._rasterEnvMapScheduled = false;
 
 		// options
 		this.renderDelay = 100;
@@ -195,14 +196,19 @@ export class WebGLPathTracer {
 
 			return generator.generateAsync( options.onProgress ).then( result => {
 
-				return this._updateFromResults( scene, camera, result );
+				this._updateFromResults( scene, camera, result );
+				return this._deferredSceneUpdates();
 
 			} );
 
 		} else {
 
 			const result = generator.generate();
-			return this._updateFromResults( scene, camera, result );
+			this._updateFromResults( scene, camera, result );
+			this.updateMaterials();
+			this.updateLights();
+			this.updateEnvironment();
+			return result;
 
 		}
 
@@ -222,6 +228,16 @@ export class WebGLPathTracer {
 
 		this.camera = camera;
 		this.updateCamera();
+
+	}
+
+	/**
+	 * Compile the path tracing material (e.g. after setScene) so the first frame doesn't do compile + path trace together.
+	 * Reduces GPU load on initial load. Returns a promise that resolves when compilation is done.
+	 */
+	compileAsync() {
+
+		return this._pathTracer.compileMaterial();
 
 	}
 
@@ -357,7 +373,7 @@ export class WebGLPathTracer {
 
 			if ( sanitizedMap.type === HalfFloatType ) {
 
-				// Reuse or create FloatType copy for raster view
+				// Reuse or create FloatType copy for raster view (deferred to avoid blocking first frame with CPU-heavy fromHalfFloat loop)
 				if ( this._previousRasterEnvMapSource !== sanitizedMap && this._rasterEnvMap ) {
 
 					this._rasterEnvMap.dispose();
@@ -366,23 +382,43 @@ export class WebGLPathTracer {
 				}
 				if ( ! this._rasterEnvMap ) {
 
-					const { width, height, data } = sanitizedMap.image;
-					const stride = Math.floor( data.length / ( width * height ) );
-					const floatData = new Float32Array( width * height * 4 );
-					for ( let i = 0; i < width * height; i ++ ) {
+					if ( ! this._rasterEnvMapScheduled ) {
 
-						floatData[ 4 * i + 0 ] = DataUtils.fromHalfFloat( data[ stride * i + 0 ] );
-						floatData[ 4 * i + 1 ] = DataUtils.fromHalfFloat( data[ stride * i + 1 ] );
-						floatData[ 4 * i + 2 ] = DataUtils.fromHalfFloat( data[ stride * i + 2 ] );
-						floatData[ 4 * i + 3 ] = stride >= 4 ? DataUtils.fromHalfFloat( data[ stride * i + 3 ] ) : 1.0;
+						this._rasterEnvMapScheduled = true;
+						const self = this;
+						const source = sanitizedMap;
+						const sc = scene;
+						requestAnimationFrame( function buildRasterEnvMap() {
+
+							self._rasterEnvMapScheduled = false;
+							if ( self._previousRasterEnvMapSource !== source || self._rasterEnvMap ) return;
+
+							const { width, height, data } = source.image;
+							const stride = Math.floor( data.length / ( width * height ) );
+							const floatData = new Float32Array( width * height * 4 );
+							for ( let i = 0; i < width * height; i ++ ) {
+
+								floatData[ 4 * i + 0 ] = DataUtils.fromHalfFloat( data[ stride * i + 0 ] );
+								floatData[ 4 * i + 1 ] = DataUtils.fromHalfFloat( data[ stride * i + 1 ] );
+								floatData[ 4 * i + 2 ] = DataUtils.fromHalfFloat( data[ stride * i + 2 ] );
+								floatData[ 4 * i + 3 ] = stride >= 4 ? DataUtils.fromHalfFloat( data[ stride * i + 3 ] ) : 1.0;
+
+							}
+							self._rasterEnvMap = new DataTexture( floatData, width, height, RGBAFormat, FloatType, EquirectangularReflectionMapping, RepeatWrapping, ClampToEdgeWrapping, LinearFilter, LinearFilter );
+							self._rasterEnvMap.needsUpdate = true;
+							self._previousRasterEnvMapSource = source;
+							sc.environment = self._rasterEnvMap;
+
+						} );
 
 					}
-					this._rasterEnvMap = new DataTexture( floatData, width, height, RGBAFormat, FloatType, EquirectangularReflectionMapping, RepeatWrapping, ClampToEdgeWrapping, LinearFilter, LinearFilter );
-					this._rasterEnvMap.needsUpdate = true;
-					this._previousRasterEnvMapSource = sanitizedMap;
+					// This frame: raster may use HalfFloat (one-frame delay); path tracer uses envMapInfo.map as-is
+
+				} else {
+
+					scene.environment = this._rasterEnvMap;
 
 				}
-				scene.environment = this._rasterEnvMap;
 
 			} else {
 
@@ -444,11 +480,28 @@ export class WebGLPathTracer {
 		this.camera = camera;
 
 		this.updateCamera();
-		this.updateMaterials();
-		this.updateEnvironment();
-		this.updateLights();
 
+		// Defer materials/lights/env to next frame so we don't do geometry + texture uploads + env in one frame (reduces GPU exhaustion on initial load).
+		// updateMaterials/updateEnvironment do heavy texture and env work; staggering spreads the load.
 		return results;
+
+	}
+
+	// Returns a promise that resolves after running materials/lights/env updates in the next frame. Used after _updateFromResults when building async.
+	_deferredSceneUpdates() {
+
+		return new Promise( ( resolve ) => {
+
+			requestAnimationFrame( () => {
+
+				this.updateMaterials();
+				this.updateLights();
+				this.updateEnvironment();
+				resolve();
+
+			} );
+
+		} );
 
 	}
 

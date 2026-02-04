@@ -339,6 +339,8 @@ async function init() {
 	contentGroup.name = 'contentGroup';
 	scene.add(contentGroup);
 
+	// Solid ground: path tracer uses hit-flag (SKIP_SURFACE/HIT_SURFACE) + alpha-based transparency (alpha test or stochastic alpha) + transmission.
+	// getSurfaceRecord() returns SKIP when transparent/alpha test; transmission and attenuateHit() handle glass-like floor. No luminance for PNG transparency.
 	const floorTex = generateRadialFloorTexture(2048);
 	floorPlane = new Mesh(
 		new PlaneGeometry(),
@@ -3155,6 +3157,9 @@ async function updateModel() {
 		onProgress: v => loader.setPercentage(0.5 + 0.5 * v),
 
 	});
+	// Compile path tracer material before first frame so we don't do compile + path trace in the same frame (reduces GPU load)
+	await pathTracer.compileAsync();
+	await new Promise( r => requestAnimationFrame( r ) );
 
 	loader.setPercentage(1);
 	loader.setCredits(modelInfo.credit || '');
@@ -3169,6 +3174,9 @@ params.floorColor = modelInfo.floorColor || '#111111';
 
 	buildGui();
 	onParamsChange();
+
+	pathTracer.renderDelay = 400;
+	setTimeout( () => { pathTracer.renderDelay = 100; }, 2500 );
 
 	renderer.domElement.style.visibility = 'visible';
 	if (params.checkerboardTransparency) {
