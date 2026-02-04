@@ -96,10 +96,9 @@ const params = {
 
 	multipleImportanceSampling: true,
 	acesToneMapping: true,
-	// renderScale 1.0 on initial load to avoid GPU exhaustion; user can increase after warm-up.
 	...getScaledSettings(),
-	renderScale: 1.0,
-	tiles: 1,       // 1 tile = no splitting = fastest preview responsiveness
+	renderScale: 2.0,
+	tiles: 5,
 
 	model: '',
 
