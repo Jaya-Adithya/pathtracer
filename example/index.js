@@ -1514,13 +1514,9 @@ function buildGui() {
 		const isMaterialAlpha = mode === 'Material alpha';
 		params.floorShadowReflectionCatcher = isCatcher;
 
-		// Show solid-style controls for Solid Ground and Material alpha; hide for Shadow Catcher
-		solidControls.forEach( ctrl => {
-
-			ctrl.domElement.style.display = isCatcher ? 'none' : '';
-
-		} );
-		shadowOpacityCtrl.domElement.style.display = isCatcher ? '' : 'none';
+		// All floor controls visible for all modes (no hiding)
+		solidControls.forEach( ctrl => { ctrl.domElement.style.display = ''; } );
+		shadowOpacityCtrl.domElement.style.display = '';
 
 		if ( isCatcher ) {
 

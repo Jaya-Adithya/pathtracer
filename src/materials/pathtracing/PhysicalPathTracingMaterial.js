@@ -481,16 +481,22 @@ export class PhysicalPathTracingMaterial extends MaterialBase {
 
 						}
 
-						// shadow/reflection catcher: Transparent Solid Ground logic
-						// Matches Solid Ground physics (PDF weighting) but composites over background
+						// shadow/reflection catcher: Production Grade V2
+						// Solves wavering ripples (stable Fresnel), double ghosting (transmission mask), black circle (screen-blend alpha)
 						if ( material.shadowReflectionCatcher && state.firstRay ) {
 
 							vec3 hitPoint = stepRayOrigin( ray.origin, ray.direction, surf.faceNormal, surfaceHit.dist );
 
-							// --- 1. REFLECTION TRACING (Physically Accurate) ---
-							ScatterRecord catcherScatter = bsdfSample( - ray.direction, surf );
+							// --- 1. STABLE FRESNEL MASK (prevents "waver" ripples) ---
+							// Use perfect reflection vector so the mask does not jitter with roughness
+							vec3 perfectReflDir = reflect( ray.direction, surf.faceNormal );
+							vec3 stableHalfVector = normalize( - ray.direction + perfectReflDir );
+							float stableDotVH = saturate( dot( - ray.direction, stableHalfVector ) );
+							vec3 f0 = mix( vec3( surf.f0 * surf.specularIntensity ), surf.color, surf.metalness );
+							vec3 transmissionMask = vec3( 1.0 ) - schlickFresnel( stableDotVH, f0 );
 
-							// Monte Carlo weighting (Color / PDF) — same as main path loop for correct intensity/roughness
+							// --- 2. REFLECTION TRACING (roughness-aware ray) ---
+							ScatterRecord catcherScatter = bsdfSample( - ray.direction, surf );
 							vec3 reflectionWeight = vec3( 0.0 );
 							if ( catcherScatter.pdf > 0.0 ) {
 								reflectionWeight = catcherScatter.color / catcherScatter.pdf;
@@ -503,7 +509,6 @@ export class PhysicalPathTracingMaterial extends MaterialBase {
 							if ( dot( reflDir, surf.faceNormal ) < 0.0 ) {
 								reflDir = reflect( ray.direction, surf.faceNormal );
 							}
-
 							Ray reflRay;
 							reflRay.origin = stepRayOrigin( hitPoint, reflDir, surf.faceNormal, 0.0 );
 							reflRay.direction = reflDir;
@@ -522,7 +527,7 @@ export class PhysicalPathTracingMaterial extends MaterialBase {
 								}
 							}
 
-							// --- 2. SHADOW TRACING ---
+							// --- 3. SHADOW TRACING ---
 							float shadowFactor = 0.0;
 							state.isShadowRay = true;
 							if ( lightsDenom != 0.0 && rand( 9 ) < float( lights.count ) / lightsDenom ) {
@@ -548,14 +553,19 @@ export class PhysicalPathTracingMaterial extends MaterialBase {
 							}
 							state.isShadowRay = false;
 
-							// --- 3. COMPOSITING ---
+							// --- 4. COMPOSITING (transmission masking: reflection hides shadow/background) ---
 							vec3 backColor = sampleBackground( ray.direction, rand2( 2 ) );
+							vec3 shadowedBackground = backColor * ( 1.0 - shadowFactor );
 							vec3 finalReflection = reflectionColor * reflectionWeight;
-							gl_FragColor.rgb = backColor * ( 1.0 - shadowFactor ) + finalReflection;
+							gl_FragColor.rgb = shadowedBackground * transmissionMask + finalReflection;
 
-							// --- 4. ALPHA --- (relative luminance for colored reflections)
-							float reflectionAlpha = dot( finalReflection, vec3( 0.2126, 0.7152, 0.0722 ) );
-							gl_FragColor.a = max( backgroundAlpha, max( shadowFactor, saturate( reflectionAlpha * 10.0 ) ) );
+							// --- 5. ALPHA (screen blend to avoid black circle) ---
+							float reflectionLuma = dot( finalReflection, vec3( 0.2126, 0.7152, 0.0722 ) );
+							float reflAlpha = saturate( reflectionLuma * 1.5 );
+							float shadowAlpha = shadowFactor * opacity;
+							shadowAlpha *= ( 1.0 - reflAlpha );
+							float combinedAlpha = 1.0 - ( 1.0 - shadowAlpha ) * ( 1.0 - reflAlpha );
+							gl_FragColor.a = max( backgroundAlpha, combinedAlpha );
 
 							break;
 
