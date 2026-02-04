@@ -96,10 +96,9 @@ const params = {
 
 	multipleImportanceSampling: true,
 	acesToneMapping: true,
-	// ✅ renderScale and tiles are controlled explicitly here so we can run the path tracer at very high resolution
-	// We spread getScaledSettings() first so these explicit values always win.
+	// renderScale 1.0 on initial load to avoid GPU exhaustion; user can increase after warm-up.
 	...getScaledSettings(),
-	renderScale: 2, // 🔥 Requested: internal render scale 3x
+	renderScale: 1.0,
 	tiles: 1,       // 1 tile = no splitting = fastest preview responsiveness
 
 	model: '',
@@ -129,7 +128,7 @@ const params = {
 	pause: false,
 	previewSamplesMax: 100,  // cap preview accumulation – final render uses its own target
 
-	floorMode: 'Shadow Catcher',  // 'Solid Ground' | 'Shadow Catcher'
+	floorMode: 'Shadow Catcher',  // 'Solid Ground' | 'Shadow Catcher' | 'Material alpha'
 	floorColor: '#111111',
 	floorOpacity: 1.0,
 	floorShadowOpacity: 0.5,  // Shadow Catcher only: intensity of shadow on ground (0–2)
@@ -137,7 +136,7 @@ const params = {
 	floorMetalness: 0.2,
 	floorTransmission: 0.0,
 	floorIOR: 1.5,
-	floorShadowReflectionCatcher: true,  // derived from floorMode
+	floorShadowReflectionCatcher: true,  // derived from floorMode (true only for Shadow Catcher)
 
 	screenBrightness: 1, // Predefined wallpapers: 1; custom wallpaper defaults to 4.5 when selected
 	screenWallpaper: 'blank_screen', // Selected wallpaper
@@ -553,10 +552,25 @@ function onParamsChange() {
 	floorPlane.material.color.set(params.floorColor);
 	floorPlane.material.roughness = params.floorRoughness;
 	floorPlane.material.metalness = params.floorMetalness;
-	floorPlane.material.opacity = params.floorShadowReflectionCatcher ? Math.min( 1, params.floorShadowOpacity ) : params.floorOpacity;
 	floorPlane.material.transmission = params.floorTransmission;
 	floorPlane.material.ior = params.floorIOR;
 	floorPlane.material.shadowReflectionCatcher = params.floorShadowReflectionCatcher;
+	if ( params.floorMode === 'Shadow Catcher' ) {
+
+		floorPlane.material.opacity = Math.min( 1, params.floorShadowOpacity );
+		floorPlane.material.transparent = true;
+
+	} else if ( params.floorMode === 'Material alpha' ) {
+
+		floorPlane.material.opacity = params.floorOpacity;
+		floorPlane.material.transparent = true;
+
+	} else {
+
+		floorPlane.material.opacity = params.floorOpacity;
+		floorPlane.material.transparent = params.floorOpacity < 1 || params.floorTransmission > 0;
+
+	}
 
 	syncSceneEnvironmentFromParams();
 
@@ -1478,41 +1492,45 @@ function buildGui() {
 
 	const floorFolder = gui.addFolder( 'Floor' );
 
-	// Floor mode toggle
-	const floorModeCtrl = floorFolder.add( params, 'floorMode', [ 'Solid Ground', 'Shadow Catcher' ] ).name( 'Mode' );
+	// Shadow Catcher = transparent ground + reflections/shadows (alpha from geometry). Material alpha = transparent from opacity/alpha only (hit-flag, no luminance).
+	const floorModeCtrl = floorFolder.add( params, 'floorMode', [ 'Solid Ground', 'Shadow Catcher', 'Material alpha' ] ).name( 'Mode' );
 
-	// Solid-only controls (hidden in catcher mode)
+	// Solid + Material alpha: color, opacity, transmission, IOR (hidden in Shadow Catcher mode)
 	const solidControls = [];
 	solidControls.push( floorFolder.addColor( params, 'floorColor' ).onChange( onParamsChange ) );
-	solidControls.push( floorFolder.add( params, 'floorOpacity', 0, 1 ).onChange( onParamsChange ) );
+	solidControls.push( floorFolder.add( params, 'floorOpacity', 0, 1 ).onChange( onParamsChange ).name( 'Opacity' ) );
 	solidControls.push( floorFolder.add( params, 'floorTransmission', 0, 1 ).name( 'Transmission' ).onChange( onParamsChange ) );
 	solidControls.push( floorFolder.add( params, 'floorIOR', 1.0, 2.0, 0.01 ).name( 'IOR' ).onChange( onParamsChange ) );
 
 	// Shadow Catcher–only: shadow opacity (intensity of shadow on ground)
 	const shadowOpacityCtrl = floorFolder.add( params, 'floorShadowOpacity', 0, 2 ).onChange( onParamsChange ).name( 'Shadow opacity' );
 
-	// Shared controls (visible in both modes)
+	// Shared controls (visible in all modes)
 	floorFolder.add( params, 'floorRoughness', 0, 1 ).onChange( onParamsChange );
 	floorFolder.add( params, 'floorMetalness', 0, 1 ).onChange( onParamsChange );
 
 	function applyFloorMode( mode ) {
 
 		const isCatcher = mode === 'Shadow Catcher';
+		const isMaterialAlpha = mode === 'Material alpha';
 		params.floorShadowReflectionCatcher = isCatcher;
 
-		// Show/hide solid-only controls
+		// Show solid-style controls for Solid Ground and Material alpha; hide for Shadow Catcher
 		solidControls.forEach( ctrl => {
 
 			ctrl.domElement.style.display = isCatcher ? 'none' : '';
 
 		} );
-		// Show shadow opacity only in Shadow Catcher mode
 		shadowOpacityCtrl.domElement.style.display = isCatcher ? '' : 'none';
 
-		// In catcher mode use shadow opacity for floor (raster + path tracer; clamp to 1 for material)
 		if ( isCatcher ) {
 
 			floorPlane.material.opacity = Math.min( 1, params.floorShadowOpacity );
+			floorPlane.material.transparent = true;
+
+		} else if ( isMaterialAlpha ) {
+
+			floorPlane.material.opacity = params.floorOpacity;
 			floorPlane.material.transparent = true;
 
 		} else {
@@ -2900,6 +2918,9 @@ async function updateModel() {
 
 	}
 
+	// Yield one frame so we don't start load in the same frame as dispose (reduces GPU/main-thread burst)
+	await new Promise( r => requestAnimationFrame( r ) );
+
 	let loadResult;
 	try {
 
@@ -3150,6 +3171,9 @@ async function updateModel() {
 
 	}
 
+	// Yield one frame after model ready so geometry merge doesn't run in same tick as post-load traversals
+	await new Promise( r => requestAnimationFrame( r ) );
+
 	// 5. Now build the path tracer scene ONCE with correct visibility + animation pose
 	scene.updateMatrixWorld(true);
 	await pathTracer.setSceneAsync(scene, activeCamera, {
@@ -3157,8 +3181,10 @@ async function updateModel() {
 		onProgress: v => loader.setPercentage(0.5 + 0.5 * v),
 
 	});
-	// Compile path tracer material before first frame so we don't do compile + path trace in the same frame (reduces GPU load)
+	// Compile path tracer material before first frame (reduces GPU load)
 	await pathTracer.compileAsync();
+	// Two rAFs after compile so we don't show + first path trace in the same frame as compile
+	await new Promise( r => requestAnimationFrame( r ) );
 	await new Promise( r => requestAnimationFrame( r ) );
 
 	loader.setPercentage(1);
@@ -3175,8 +3201,15 @@ params.floorColor = modelInfo.floorColor || '#111111';
 	buildGui();
 	onParamsChange();
 
-	pathTracer.renderDelay = 400;
-	setTimeout( () => { pathTracer.renderDelay = 100; }, 2500 );
+	// Start at lower scale and higher delay to avoid GPU exhaustion on first frames
+	pathTracer.renderScale = 0.5;
+	pathTracer.renderDelay = 500;
+	setTimeout( () => {
+
+		pathTracer.renderDelay = 100;
+		pathTracer.renderScale = params.renderScale;
+
+	}, 3000 );
 
 	renderer.domElement.style.visibility = 'visible';
 	if (params.checkerboardTransparency) {

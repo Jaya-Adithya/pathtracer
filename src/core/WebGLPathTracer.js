@@ -144,6 +144,8 @@ export class WebGLPathTracer {
 		this._rasterEnvMap = null; // FloatType copy for scene.environment (raster PBR)
 		this._previousRasterEnvMapSource = null;
 		this._rasterEnvMapScheduled = false;
+		this._pendingMaterialIndexUpdate = null;
+		this._pendingGeometry = null;
 
 		// options
 		this.renderDelay = 100;
@@ -205,6 +207,11 @@ export class WebGLPathTracer {
 
 			const result = generator.generate();
 			this._updateFromResults( scene, camera, result );
+			if ( result.needsMaterialIndexUpdate && result.geometry ) {
+
+				this._pathTracer.material.materialIndexAttribute.updateFrom( result.geometry.attributes.materialIndex );
+
+			}
 			this.updateMaterials();
 			this.updateLights();
 			this.updateEnvironment();
@@ -468,9 +475,16 @@ export class WebGLPathTracer {
 
 		}
 
+		// Defer material index + materials/lights/env to staggered rAFs (reduces GPU exhaustion on initial load)
 		if ( needsMaterialIndexUpdate ) {
 
-			material.materialIndexAttribute.updateFrom( geometry.attributes.materialIndex );
+			this._pendingMaterialIndexUpdate = true;
+			this._pendingGeometry = geometry;
+
+		} else {
+
+			this._pendingMaterialIndexUpdate = false;
+			this._pendingGeometry = null;
 
 		}
 
@@ -481,23 +495,34 @@ export class WebGLPathTracer {
 
 		this.updateCamera();
 
-		// Defer materials/lights/env to next frame so we don't do geometry + texture uploads + env in one frame (reduces GPU exhaustion on initial load).
-		// updateMaterials/updateEnvironment do heavy texture and env work; staggering spreads the load.
 		return results;
 
 	}
 
-	// Returns a promise that resolves after running materials/lights/env updates in the next frame. Used after _updateFromResults when building async.
+	// Staggered updates across two frames: rAF1 = material index + materials + lights; rAF2 = env. Reduces GPU exhaustion on initial load.
 	_deferredSceneUpdates() {
 
+		const self = this;
 		return new Promise( ( resolve ) => {
 
 			requestAnimationFrame( () => {
 
-				this.updateMaterials();
-				this.updateLights();
-				this.updateEnvironment();
-				resolve();
+				if ( self._pendingMaterialIndexUpdate && self._pendingGeometry ) {
+
+					self._pathTracer.material.materialIndexAttribute.updateFrom( self._pendingGeometry.attributes.materialIndex );
+					self._pendingMaterialIndexUpdate = false;
+					self._pendingGeometry = null;
+
+				}
+				self.updateMaterials();
+				self.updateLights();
+
+				requestAnimationFrame( () => {
+
+					self.updateEnvironment();
+					resolve();
+
+				} );
 
 			} );
 

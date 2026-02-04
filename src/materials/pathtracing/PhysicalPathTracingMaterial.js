@@ -566,9 +566,8 @@ export class PhysicalPathTracingMaterial extends MaterialBase {
 							// relying on the scattered direction to provide the "blur" from roughness.
 							gl_FragColor.rgb = reflectionColor * fresnel * ( 1.0 - shadowFactor );
 
-							// 3. Compute alpha based on luminance of the FINAL weighted reflection
-							float refLum = dot( gl_FragColor.rgb, vec3( 0.2126, 0.7152, 0.0722 ) );
-							gl_FragColor.a = ( refLum > 0.01 || shadowFactor > 0.0 ) ? 1.0 : 0.0;
+							// Alpha from geometry/visibility only: reflection hit or shadow. No luminance so dark reflections and their colors are preserved.
+							gl_FragColor.a = ( shadowFactor > 0.0 || reflHitType == SURFACE_HIT ) ? 1.0 : 0.0;
 							break;
 
 						}
