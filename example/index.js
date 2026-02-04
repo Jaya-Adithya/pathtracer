@@ -131,6 +131,7 @@ const params = {
 	floorColor: '#111111',
 	floorOpacity: 1.0,
 	floorShadowOpacity: 0.5,  // Shadow Catcher only: intensity of shadow on ground (0–2)
+	floorReflectionIntensity: 2.0,  // Shadow Catcher: intensity of reflection on ground (0–10, high = brighter)
 	floorRoughness: 0.2,
 	floorMetalness: 0.2,
 	floorTransmission: 0.0,
@@ -554,6 +555,7 @@ function onParamsChange() {
 	floorPlane.material.transmission = params.floorTransmission;
 	floorPlane.material.ior = params.floorIOR;
 	floorPlane.material.shadowReflectionCatcher = params.floorShadowReflectionCatcher;
+	floorPlane.material.shadowCatcherReflectionIntensity = params.floorReflectionIntensity;
 	if ( params.floorMode === 'Shadow Catcher' ) {
 
 		floorPlane.material.opacity = Math.min( 1, params.floorShadowOpacity );
@@ -1503,6 +1505,9 @@ function buildGui() {
 
 	// Shadow Catcher–only: shadow opacity (intensity of shadow on ground)
 	const shadowOpacityCtrl = floorFolder.add( params, 'floorShadowOpacity', 0, 2 ).onChange( onParamsChange ).name( 'Shadow opacity' );
+
+	// Shadow Catcher: reflection intensity on ground (high = brighter reflection)
+	floorFolder.add( params, 'floorReflectionIntensity', 0, 10, 0.1 ).onChange( onParamsChange ).name( 'Reflection intensity' );
 
 	// Shared controls (visible in all modes)
 	floorFolder.add( params, 'floorRoughness', 0, 1 ).onChange( onParamsChange );

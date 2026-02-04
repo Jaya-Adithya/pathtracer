@@ -49,6 +49,11 @@ declare module 'three/src/materials/MeshStandardMaterial' {
 		 * ground (no ground color, no HDRI on floor). Used by `WebGLPathTracer`.
 		 */
 		shadowReflectionCatcher: boolean;
+		/**
+		 * Shadow catcher only: intensity of reflection on the ground (e.g. 1 = normal, 2–10 = brighter).
+		 * Used by `WebGLPathTracer` when a material has `shadowReflectionCatcher`.
+		 */
+		shadowCatcherReflectionIntensity?: number;
 
 	}
 

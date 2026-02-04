@@ -272,6 +272,15 @@ export class WebGLPathTracer {
 		const textures = getTextures( materials );
 		material.textures.setTextures( renderer, textures, textureSize.x, textureSize.y );
 		material.materials.updateFrom( materials, textures );
+		// Copy shadow catcher reflection intensity from any floor material that uses it
+		material.shadowCatcherReflectionIntensity = 1.0;
+		for ( let i = 0, l = materials.length; i < l; i ++ ) {
+			const m = materials[ i ];
+			if ( m.shadowReflectionCatcher && m.shadowCatcherReflectionIntensity != null ) {
+				material.shadowCatcherReflectionIntensity = m.shadowCatcherReflectionIntensity;
+				break;
+			}
+		}
 		this.reset();
 
 	}

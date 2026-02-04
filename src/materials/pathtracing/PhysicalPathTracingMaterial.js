@@ -111,6 +111,7 @@ export class PhysicalPathTracingMaterial extends MaterialBase {
 				backgroundAlpha: { value: 1.0 },
 				backgroundIntensity: { value: 1.0 },
 				backgroundRotation: { value: new Matrix4() },
+				shadowCatcherReflectionIntensity: { value: 1.0 },
 
 				// randomness uniforms
 				seed: { value: 0 },
@@ -216,6 +217,7 @@ export class PhysicalPathTracingMaterial extends MaterialBase {
 				// background
 				uniform float backgroundBlur;
 				uniform float backgroundAlpha;
+				uniform float shadowCatcherReflectionIntensity;
 				#if FEATURE_BACKGROUND_MAP
 
 				uniform sampler2D backgroundMap;
@@ -556,7 +558,7 @@ export class PhysicalPathTracingMaterial extends MaterialBase {
 							// --- 4. COMPOSITING (transmission masking: reflection hides shadow/background) ---
 							vec3 backColor = sampleBackground( ray.direction, rand2( 2 ) );
 							vec3 shadowedBackground = backColor * ( 1.0 - shadowFactor );
-							vec3 finalReflection = reflectionColor * reflectionWeight;
+							vec3 finalReflection = reflectionColor * reflectionWeight * shadowCatcherReflectionIntensity;
 							gl_FragColor.rgb = shadowedBackground * transmissionMask + finalReflection;
 
 							// --- 5. ALPHA (screen blend to avoid black circle) ---
