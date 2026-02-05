@@ -32,6 +32,7 @@ export default {
 
 	root: './example/',
 	base: '',
+	plugins: [ copyAssetsPlugin() ],
 	build: {
 		outDir: '../bundle/',
 		sourcemap: true,
@@ -41,7 +42,6 @@ export default {
 				.filter( p => /\.html$/.test( p ) )
 				.map( p => `./example/${ p }` ),
 		},
-		plugins: [ copyAssetsPlugin() ],
 	},
 	server: {
 		fs: {
