@@ -1,6 +1,6 @@
 {
   "buildCommand": "npm run build-examples",
-  "outputDirectory": "example/bundle",
+  "outputDirectory": "bundle",
   "framework": null,
   "installCommand": "npm install",
   "rewrites": [
