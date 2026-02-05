@@ -113,8 +113,7 @@ export const light_sampling_functions = /* glsl */`
 		lightRec.dist = dist;
 		lightRec.direction = direction;
 
-		// TODO: the denominator is potentially zero
-		lightRec.pdf = lightDistSq / ( light.area * dot( direction, lightNormal ) );
+		lightRec.pdf = lightDistSq / max( light.area * abs( dot( direction, lightNormal ) ), 1e-6 );
 
 		return lightRec;
 

@@ -13,17 +13,17 @@ import {
 } from 'three';
 import { IESLoader } from 'three/examples/jsm/loaders/IESLoader.js';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader.js';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { PhysicalSpotLight, WebGLPathTracer } from '../src/index.js';
 import { HDRLoader } from 'three/examples/jsm/loaders/HDRLoader.js';
 import { GUI } from 'three/examples/jsm/libs/lil-gui.module.min.js';
 import { getScaledSettings } from './utils/getScaledSettings.js';
 import { LoaderElement } from './utils/LoaderElement.js';
+import { MODEL_LIST, DEFAULT_MODEL_KEY } from './utils/modelList.js';
 import { ParallelMeshBVHWorker } from 'three-mesh-bvh/worker';
 
-const MODEL_URL = 'https://raw.githubusercontent.com/gkjohnson/3d-demo-data/main/models/steampunk-robot/scene.gltf';
 const ENV_URL = 'https://raw.githubusercontent.com/mrdoob/three.js/r150/examples/textures/equirectangular/royal_esplanade_1k.hdr';
-const CREDITS = 'Model by Benedict Chew on Sketchfab';
 const IES_PROFILE_URLS = [
 	'https://raw.githubusercontent.com/gkjohnson/3d-demo-data/main/ies/0646706b3d2d9658994fc4ad80681dec.ies',
 	'https://raw.githubusercontent.com/gkjohnson/3d-demo-data/main/ies/06b4cfdc8805709e767b5e2e904be8ad.ies',
@@ -37,11 +37,12 @@ const IES_PROFILE_URLS = [
 ];
 
 let pathTracer, renderer, controls;
-let scene, camera, spotLight, iesTextures;
+let scene, camera, spotLight, iesTextures, currentModel = null, floorMesh, wallMesh;
 let loader;
 
 // gui parameters
 const params = {
+	model: DEFAULT_MODEL_KEY,
 	multipleImportanceSampling: true,
 	bounces: 3,
 	renderScale: 1 / window.devicePixelRatio,
@@ -91,59 +92,67 @@ async function init() {
 
 	// load assets
 	const iesLoader = new IESLoader();
-	const [ envTexture, gltf, textures ] = await Promise.all( [
+	const [ envTexture, textures ] = await Promise.all( [
 		new HDRLoader().loadAsync( ENV_URL ),
-		new GLTFLoader().loadAsync( MODEL_URL ),
 		Promise.all( IES_PROFILE_URLS.map( url => iesLoader.loadAsync( url ) ) )
 	] );
 
-	// ies textures
 	iesTextures = textures;
-
-	// environment
 	envTexture.mapping = EquirectangularReflectionMapping;
 	scene.environment = envTexture;
 	scene.background = envTexture;
 
-	// objects
-	gltf.scene.scale.setScalar( 1 );
-	gltf.scene.updateMatrixWorld();
-	gltf.scene.traverse( c => {
-
-		c.castShadow = true;
-		c.receiveShadow = true;
-
-	} );
-	scene.add( gltf.scene );
-
-	const box = new Box3();
-	box.setFromObject( gltf.scene );
-
-	// init environment
-	const floor = new Mesh(
+	// floor and wall (positions updated when model changes)
+	floorMesh = new Mesh(
 		new CylinderGeometry( 8, 8, 0.5, 200 ),
 		new MeshStandardMaterial( { color: 0x555555, roughness: 0.05, metalness: 0.4 } ),
 	);
-	floor.geometry = floor.geometry.toNonIndexed();
-	floor.geometry.clearGroups();
-	floor.position.y = box.min.y - 0.25;
-	floor.receiveShadow = true;
-	floor.material.color.convertSRGBToLinear();
-	scene.add( floor );
+	floorMesh.geometry = floorMesh.geometry.toNonIndexed();
+	floorMesh.geometry.clearGroups();
+	floorMesh.receiveShadow = true;
+	floorMesh.material.color.convertSRGBToLinear();
+	scene.add( floorMesh );
 
-	const wall = new Mesh(
+	wallMesh = new Mesh(
 		new BoxGeometry( 14, 6, 0.5 ),
 		new MeshStandardMaterial( { color: 0xa06464, roughness: 0.4, metalness: 0.1 } ),
 	);
-	wall.castShadow = true;
-	wall.receiveShadow = true;
-	wall.geometry = wall.geometry.toNonIndexed();
-	wall.geometry.clearGroups();
-	wall.position.x = 0.0;
-	wall.position.y = box.min.y + 3;
-	wall.position.z = box.min.z - 0.5;
-	wall.material.color.convertSRGBToLinear();
-	scene.add( wall );
+	wallMesh.castShadow = true;
+	wallMesh.receiveShadow = true;
+	wallMesh.geometry = wallMesh.geometry.toNonIndexed();
+	wallMesh.geometry.clearGroups();
+	wallMesh.position.x = 0.0;
+	wallMesh.material.color.convertSRGBToLinear();
+	scene.add( wallMesh );
+
+	async function loadAndSetModel( modelKey ) {
+
+		const entry = MODEL_LIST[ modelKey ];
+		if ( ! entry || ! entry.url ) return;
+		if ( currentModel ) scene.remove( currentModel );
+		loader.setPercentage( 0 );
+		const dracoLoader = new DRACOLoader();
+		dracoLoader.setDecoderPath( 'https://www.gstatic.com/draco/versioned/decoders/1.5.7/' );
+		const gltf = await new GLTFLoader().setDRACOLoader( dracoLoader ).loadAsync( entry.url );
+		dracoLoader.dispose();
+		const model = gltf.scene;
+		if ( entry.postProcess ) entry.postProcess( model );
+		model.scale.setScalar( 1 );
+		model.updateMatrixWorld();
+		model.traverse( c => { c.castShadow = true; c.receiveShadow = true; } );
+		scene.add( model );
+		currentModel = model;
+		const box = new Box3();
+		box.setFromObject( model );
+		floorMesh.position.y = box.min.y - 0.25;
+		wallMesh.position.y = box.min.y + 3;
+		wallMesh.position.z = box.min.z - 0.5;
+		scene.updateMatrixWorld( true );
+		await pathTracer.setSceneAsync( scene, camera, { onProgress: v => loader.setPercentage( v ) } );
+		loader.setCredits( entry.credit || '' );
+	}
+
+	await loadAndSetModel( params.model );
 
 	// spot light
 	spotLight = new PhysicalSpotLight( 0xffffff );
@@ -167,7 +176,7 @@ async function init() {
 	// spot light target
 	const targetObject = spotLight.target;
 	targetObject.position.x = 0;
-	targetObject.position.y = floor.position.y + 2;
+	targetObject.position.y = floorMesh.position.y + 2;
 	targetObject.position.z = 0.05;
 	scene.add( targetObject );
 
@@ -175,13 +184,13 @@ async function init() {
 		onProgress: v => loader.setPercentage( v ),
 	} );
 
-	loader.setCredits( CREDITS );
 	onParamsChange();
 	onResize();
 	window.addEventListener( 'resize', onResize );
 
 	// gui
 	const gui = new GUI();
+	gui.add( params, 'model', Object.keys( MODEL_LIST ).sort() ).onChange( async ( v ) => { await loadAndSetModel( v ); } );
 	const ptFolder = gui.addFolder( 'Path Tracing' );
 	ptFolder.add( params, 'multipleImportanceSampling' ).onChange( onParamsChange );
 	ptFolder.add( params, 'tiles', 1, 4, 1 ).onChange( value => {

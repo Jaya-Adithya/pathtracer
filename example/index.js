@@ -41,6 +41,7 @@ import { LDrawUtils } from 'three/examples/jsm/utils/LDrawUtils.js';
 import { GUI } from 'three/examples/jsm/libs/lil-gui.module.min.js';
 import Stats from 'three/examples/jsm/libs/stats.module.js';
 import { generateRadialFloorTexture } from './utils/generateRadialFloorTexture.js';
+import { MODEL_LIST } from './utils/modelList.js';
 import { GradientEquirectTexture, WebGLPathTracer } from '../src/index.js';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { getScaledSettings } from './utils/getScaledSettings.js';
@@ -215,13 +216,7 @@ async function init() {
 	// Wait for the models list to be available since vite doesn't guarantee execution order
 	// of module tags and we rely on the other script to define the set of models for display
 	// in this example. TODO: handle this more gracefully.
-	while (!window.MODEL_LIST) {
-
-		await waitFrame();
-
-	}
-
-	models = window.MODEL_LIST || {};
+	models = MODEL_LIST;
 
 	loader = new LoaderElement();
 	loader.attach(document.body);

@@ -67,10 +67,11 @@ export const bsdf_functions = /* glsl */`
 		float G = ggxShadowMaskG2( wi, wo, roughness );
 		float D = ggxDistribution( wh, roughness );
 		float G1 = ggxShadowMaskG1( incidentTheta, roughness );
-		float ggxPdf = D * G1 * max( 0.0, abs( dot( wo, wh ) ) ) / abs ( wo.z );
+		float denomZ = max( abs( wo.z ), 1e-7 );
+		float ggxPdf = D * G1 * max( 0.0, abs( dot( wo, wh ) ) ) / denomZ;
 
-		color = wi.z * F * G * D / ( 4.0 * abs( wi.z * wo.z ) );
-		return ggxPdf / ( 4.0 * dot( wo, wh ) );
+		color = wi.z * F * G * D / max( 4.0 * abs( wi.z * wo.z ), 1e-7 );
+		return ggxPdf / max( 4.0 * abs( dot( wo, wh ) ), 1e-7 );
 
 	}
 
@@ -104,7 +105,7 @@ export const bsdf_functions = /* glsl */`
 		color = surf.transmission * surf.color;
 
 		float denom = pow( eta * dot( wi, wh ) + dot( wo, wh ), 2.0 );
-		return ggxPDF( wo, wh, filteredRoughness ) / denom;
+		return ggxPDF( wo, wh, filteredRoughness ) / max( denom, 1e-7 );
 
 	}
 

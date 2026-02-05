@@ -10,6 +10,7 @@ import {
 	WebGLRenderer,
 } from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader.js';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { PhysicalCamera, BlurredEnvMapGenerator, GradientEquirectTexture, WebGLPathTracer } from '../src/index.js';
 import { HDRLoader } from 'three/examples/jsm/loaders/HDRLoader.js';
@@ -17,19 +18,19 @@ import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.j
 import { GUI } from 'three/examples/jsm/libs/lil-gui.module.min.js';
 import { getScaledSettings } from './utils/getScaledSettings.js';
 import { LoaderElement } from './utils/LoaderElement.js';
+import { MODEL_LIST, DEFAULT_MODEL_KEY } from './utils/modelList.js';
 import { ParallelMeshBVHWorker } from 'three-mesh-bvh/worker';
 
 const ENV_URL = 'https://raw.githubusercontent.com/mrdoob/three.js/r150/examples/textures/equirectangular/royal_esplanade_1k.hdr';
-const MODEL_URL = 'https://raw.githubusercontent.com/gkjohnson/3d-demo-data/main/models/sd-macross-city-standoff-diorama/scene.glb';
-const CREDITS = 'Model by tipatat on Sketchfab';
 const DESCRIPTION = 'Path tracing with configurable bokeh and depth of field. Click point in scene to focus.';
 
 let pathTracer, renderer, controls, camera, scene, bvh;
-let loader;
+let loader, currentModel = null;
 const mouse = new Vector2();
 const focusPoint = new Vector3();
 const params = {
 
+	model: DEFAULT_MODEL_KEY,
 	bounces: 3,
 	renderScale: 1 / window.devicePixelRatio,
 	filterGlossyFactor: 0.5,
@@ -41,6 +42,52 @@ const params = {
 };
 
 init();
+
+async function loadAndSetModel( modelKey ) {
+
+	const entry = MODEL_LIST[ modelKey ];
+	if ( ! entry || ! entry.url ) return;
+
+	if ( currentModel ) {
+
+		scene.remove( currentModel );
+		currentModel = null;
+
+	}
+
+	loader.setPercentage( 0 );
+	const dracoLoader = new DRACOLoader();
+	dracoLoader.setDecoderPath( 'https://www.gstatic.com/draco/versioned/decoders/1.5.7/' );
+	const gltf = await new GLTFLoader()
+		.setDRACOLoader( dracoLoader )
+		.setMeshoptDecoder( MeshoptDecoder )
+		.loadAsync( entry.url );
+	dracoLoader.dispose();
+	const model = gltf.scene;
+	if ( entry.postProcess ) entry.postProcess( model );
+	model.scale.setScalar( 0.5 );
+	model.traverse( c => {
+
+		if ( c.material ) {
+
+			c.material.roughness = 0.05;
+			c.material.metalness = 0.05;
+
+		}
+
+	} );
+	scene.add( model );
+	currentModel = model;
+	scene.updateMatrixWorld( true );
+
+	const results = await pathTracer.setSceneAsync( scene, camera, {
+		onProgress: v => loader.setPercentage( v ),
+	} );
+	bvh = results && results.bvh ? results.bvh : null;
+	loader.setCredits( entry.credit || '' );
+	onParamsChange();
+
+}
 
 async function init() {
 
@@ -92,9 +139,8 @@ async function init() {
 
 	} );
 
-	const [ envTexture, gltf ] = await Promise.all( [
+	const [ envTexture ] = await Promise.all( [
 		new HDRLoader().loadAsync( ENV_URL ),
-		new GLTFLoader().setMeshoptDecoder( MeshoptDecoder ).loadAsync( MODEL_URL )
 	] );
 
 	// set up environment map
@@ -105,7 +151,7 @@ async function init() {
 
 	scene.environment = blurredTex;
 
-	// create bright points around the scene
+	// create bright points around the scene (kept when switching models)
 	const geometry = new SphereGeometry( 1, 10, 10 );
 	const mat = new MeshStandardMaterial( { emissiveIntensity: 10, emissive: 0xffffff } );
 	for ( let i = 0; i < 300; i ++ ) {
@@ -117,27 +163,8 @@ async function init() {
 
 	}
 
-	gltf.scene.scale.setScalar( 0.5 );
-	gltf.scene.traverse( c => {
+	await loadAndSetModel( params.model );
 
-		if ( c.material ) {
-
-			c.material.roughness = 0.05;
-			c.material.metalness = 0.05;
-
-		}
-
-	} );
-	scene.add( gltf.scene );
-	scene.updateMatrixWorld( true );
-
-	// update the scene
-	const results = await pathTracer.setSceneAsync( scene, camera, {
-		onProgress: v => loader.setPercentage( v ),
-	} );
-	bvh = results.bvh;
-
-	loader.setCredits( CREDITS );
 	loader.setDescription( DESCRIPTION );
 	onParamsChange();
 	onResize();
@@ -148,6 +175,9 @@ async function init() {
 
 	// gui
 	const gui = new GUI();
+	gui.add( params, 'model', Object.keys( MODEL_LIST ).sort() ).onChange( async ( v ) => {
+		await loadAndSetModel( v );
+	} );
 	const ptFolder = gui.addFolder( 'Path Tracer' );
 	ptFolder.add( params, 'tiles', 1, 4, 1 ).onChange( value => {
 

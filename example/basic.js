@@ -7,21 +7,23 @@ import {
 	CubeTextureLoader,
 } from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader.js';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { HDRLoader } from 'three/examples/jsm/loaders/HDRLoader.js';
 import { ParallelMeshBVHWorker } from 'three-mesh-bvh/worker';
 import { getScaledSettings } from './utils/getScaledSettings.js';
 import { LoaderElement } from './utils/LoaderElement.js';
+import { MODEL_LIST, DEFAULT_MODEL_KEY } from './utils/modelList.js';
 import { WebGLPathTracer } from '..';
+import { GUI } from 'three/examples/jsm/libs/lil-gui.module.min.js';
 
 const ENV_URL = 'https://raw.githubusercontent.com/gkjohnson/3d-demo-data/master/hdri/chinese_garden_1k.hdr';
-const MODEL_URL = 'https://raw.githubusercontent.com/gkjohnson/3d-demo-data/main/models/terrarium-robots/scene.gltf';
-const CREDITS = 'Model by "nyancube" on Sketchfab';
 const DESCRIPTION = 'Simple path tracing example scene setup with background blur.';
 
 let pathTracer, renderer, controls;
-let camera, scene;
+let camera, scene, currentModel = null;
 let loader;
+const params = { model: DEFAULT_MODEL_KEY };
 
 init();
 
@@ -85,25 +87,36 @@ async function init() {
 
 	}
 
-	// load the environment map and model
-	const [ gltf, envTexture ] = await Promise.all( [
-		new GLTFLoader().loadAsync( MODEL_URL ),
-		envPromise,
-	] );
-
+	const envTexture = await envPromise;
 	scene.background = envTexture;
 	scene.environment = envTexture;
-	scene.add( gltf.scene );
 
-	// initialize the path tracer
-	await pathTracer.setSceneAsync( scene, camera, {
-		onProgress: v => loader.setPercentage( v ),
-	} );
+	async function loadAndSetModel( modelKey ) {
 
-	loader.setCredits( CREDITS );
+		const entry = MODEL_LIST[ modelKey ];
+		if ( ! entry || ! entry.url ) return;
+		if ( currentModel ) scene.remove( currentModel );
+		loader.setPercentage( 0 );
+		const dracoLoader = new DRACOLoader();
+		dracoLoader.setDecoderPath( 'https://www.gstatic.com/draco/versioned/decoders/1.5.7/' );
+		const gltf = await new GLTFLoader().setDRACOLoader( dracoLoader ).loadAsync( entry.url );
+		dracoLoader.dispose();
+		const model = gltf.scene;
+		if ( entry.postProcess ) entry.postProcess( model );
+		scene.add( model );
+		currentModel = model;
+		scene.updateMatrixWorld( true );
+		await pathTracer.setSceneAsync( scene, camera, { onProgress: v => loader.setPercentage( v ) } );
+		loader.setCredits( entry.credit || '' );
+	}
+
+	await loadAndSetModel( params.model );
+
 	loader.setDescription( DESCRIPTION );
-
 	window.addEventListener( 'resize', onResize );
+
+	const gui = new GUI();
+	gui.add( params, 'model', Object.keys( MODEL_LIST ).sort() ).onChange( async ( v ) => { await loadAndSetModel( v ); } );
 
 	onResize();
 	animate();

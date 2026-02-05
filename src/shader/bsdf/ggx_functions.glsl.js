@@ -95,7 +95,7 @@ export const ggx_functions = /* glsl */`
 		float D = ggxDistribution( halfVector, roughness );
 		float G1 = ggxShadowMaskG1( incidentTheta, roughness );
 
-		return D * G1 * max( 0.0, dot( wi, halfVector ) ) / wi.z;
+		return D * G1 * max( 0.0, dot( wi, halfVector ) ) / max( abs( wi.z ), 1e-7 );
 
 	}
 

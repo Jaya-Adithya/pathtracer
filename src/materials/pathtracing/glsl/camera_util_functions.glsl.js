@@ -71,11 +71,20 @@ export const camera_util_functions = /* glsl */`
 			// create the new ray
 			ray.origin += ( cameraWorldMatrix * vec4( apertureSample, 0.0, 0.0 ) ).xyz;
 			ray.direction = focalPoint - ray.origin;
-
+			// avoid division by zero in normalize when origin equals focal point
+			float dirLen = length( ray.direction );
+			if ( dirLen < 1e-6 ) {
+				ray.direction = ( cameraWorldMatrix * vec4( 0.0, 0.0, - 1.0, 0.0 ) ).xyz;
+				ray.direction = normalize( ray.direction );
+			} else {
+				ray.direction /= dirLen;
+			}
 		}
 		#endif
 
+		#if FEATURE_DOF == 0
 		ray.direction = normalize( ray.direction );
+		#endif
 
 		return ray;
 

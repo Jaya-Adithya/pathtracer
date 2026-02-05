@@ -158,7 +158,7 @@ export class WebGLPathTracer {
 		scene: Scene,
 		camera: Camera,
 		options?: { onProgress?: ( progress: number ) => void }
-	): Promise<void>;
+	): Promise<PathTracingSceneGeneratorResult | void>;
 	setCamera( camera: Camera ): void;
 	compileAsync(): Promise<void>;
 

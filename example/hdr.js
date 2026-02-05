@@ -12,10 +12,12 @@ import {
 	NoToneMapping,
 } from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader.js';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { HDRLoader } from 'three/examples/jsm/loaders/HDRLoader.js';
 import { ParallelMeshBVHWorker } from 'three-mesh-bvh/worker';
 import { LoaderElement } from './utils/LoaderElement.js';
+import { MODEL_LIST, DEFAULT_MODEL_KEY } from './utils/modelList.js';
 import { WebGLPathTracer } from '..';
 import { generateRadialFloorTexture } from './utils/generateRadialFloorTexture.js';
 import { GUI } from 'three/examples/jsm/libs/lil-gui.module.min.js';
@@ -24,13 +26,12 @@ import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.j
 import { getScaledSettings } from './utils/getScaledSettings.js';
 
 const ENV_URL = 'https://raw.githubusercontent.com/gkjohnson/3d-demo-data/master/hdri/studio_small_05_1k.hdr';
-const MODEL_URL = 'https://raw.githubusercontent.com/gkjohnson/3d-demo-data/main/models/nasa-m2020/MER_static.glb';
-const CREDITS = 'Model courtesy of NASA/Caltech-JPL';
 const DESCRIPTION = window.matchMedia( '(dynamic-range: high)' ).matches ? 'HDR display supported' : 'HDR display not supported';
 
 const MAX_SAMPLES = 45;
 
 const params = {
+	model: DEFAULT_MODEL_KEY,
 	pause: false,
 	hdr: true,
 	sdrToneMapping: false,
@@ -43,7 +44,7 @@ const params = {
 };
 
 let pathTracer, renderer, controls;
-let camera, scene;
+let camera, scene, currentModel = null;
 let loader, hdrGenerator;
 let activeImage = false;
 
@@ -90,19 +91,10 @@ async function init() {
 	} );
 	controls.update();
 
-	// load the environment map and model
-	const [ gltf, envTexture ] = await Promise.all( [
-		new GLTFLoader().setMeshoptDecoder( MeshoptDecoder ).loadAsync( MODEL_URL ),
-		new HDRLoader().loadAsync( ENV_URL ),
-	] );
-
+	const envTexture = await new HDRLoader().loadAsync( ENV_URL );
 	envTexture.mapping = EquirectangularReflectionMapping;
 	scene.environment = envTexture;
 	scene.environmentIntensity = params.environmentIntensity;
-
-	const model = gltf.scene;
-	model.scale.setScalar( 10 );
-	scene.add( model );
 
 	const floorTex = generateRadialFloorTexture( 2048 );
 	const floorPlane = new Mesh(
@@ -120,15 +112,35 @@ async function init() {
 	floorPlane.rotation.x = - Math.PI / 2;
 	scene.add( floorPlane );
 
-	// initialize the path tracer
-	await pathTracer.setSceneAsync( scene, camera, {
-		onProgress: v => loader.setPercentage( v ),
-	} );
+	async function loadAndSetModel( modelKey ) {
 
-	loader.setCredits( CREDITS );
+		const entry = MODEL_LIST[ modelKey ];
+		if ( ! entry || ! entry.url ) return;
+		if ( currentModel ) scene.remove( currentModel );
+		loader.setPercentage( 0 );
+		const dracoLoader = new DRACOLoader();
+		dracoLoader.setDecoderPath( 'https://www.gstatic.com/draco/versioned/decoders/1.5.7/' );
+		const gltf = await new GLTFLoader()
+			.setDRACOLoader( dracoLoader )
+			.setMeshoptDecoder( MeshoptDecoder )
+			.loadAsync( entry.url );
+		dracoLoader.dispose();
+		const model = gltf.scene;
+		if ( entry.postProcess ) entry.postProcess( model );
+		model.scale.setScalar( 10 );
+		scene.add( model );
+		currentModel = model;
+		scene.updateMatrixWorld( true );
+		await pathTracer.setSceneAsync( scene, camera, { onProgress: v => loader.setPercentage( v ) } );
+		loader.setCredits( entry.credit || '' );
+	}
+
+	await loadAndSetModel( params.model );
+
 	loader.setDescription( DESCRIPTION );
 
 	const gui = new GUI();
+	gui.add( params, 'model', Object.keys( MODEL_LIST ).sort() ).onChange( async ( v ) => { await loadAndSetModel( v ); } );
 	gui.add( params, 'pause' ).onChange( () => {
 
 		resetHdr();

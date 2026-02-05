@@ -199,7 +199,7 @@ export class WebGLPathTracer {
 			return generator.generateAsync( options.onProgress ).then( result => {
 
 				this._updateFromResults( scene, camera, result );
-				return this._deferredSceneUpdates();
+				return this._deferredSceneUpdates().then( () => result );
 
 			} );
 

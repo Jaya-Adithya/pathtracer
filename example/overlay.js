@@ -17,21 +17,22 @@ import { WebGLPathTracer } from '../src/index.js';
 import { HDRLoader } from 'three/examples/jsm/loaders/HDRLoader.js';
 import { GUI } from 'three/examples/jsm/libs/lil-gui.module.min.js';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader.js';
 import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js';
 import { ParallelMeshBVHWorker } from 'three-mesh-bvh/worker';
 import { getScaledSettings } from './utils/getScaledSettings.js';
 import { LoaderElement } from './utils/LoaderElement.js';
+import { MODEL_LIST, DEFAULT_MODEL_KEY } from './utils/modelList.js';
 
 const ENV_URL = 'https://raw.githubusercontent.com/mrdoob/three.js/r150/examples/textures/equirectangular/royal_esplanade_1k.hdr';
-const MODEL_URL = 'https://raw.githubusercontent.com/gkjohnson/3d-demo-data/main/models/sd-macross-city-standoff-diorama/scene.glb';
-const CREDITS = 'Model by tipatat on Sketchfab';
 
 let pathTracer, renderer, controls, scene, camera;
-let overlayScene, floatingObjects;
+let overlayScene, floatingObjects, currentModel = null;
 let loader;
 
 const params = {
 
+	model: DEFAULT_MODEL_KEY,
 	// path tracer settings
 	bounces: 5,
 	renderScale: 1 / window.devicePixelRatio,
@@ -78,29 +79,40 @@ async function init() {
 	// init overlayScene
 	overlayScene = new Scene();
 
-	// load the assets
-	const [ envTexture, gltf ] = await Promise.all( [
-		new HDRLoader().loadAsync( ENV_URL ),
-		new GLTFLoader().setMeshoptDecoder( MeshoptDecoder ).loadAsync( MODEL_URL )
-	] );
-
-	// update the env map
+	// load the env
+	const envTexture = await new HDRLoader().loadAsync( ENV_URL );
 	envTexture.mapping = EquirectangularReflectionMapping;
 	scene.background = envTexture;
 	scene.environment = envTexture;
 
-	// position the model
-	const box = new Box3();
-	gltf.scene.traverse( c => {
+	async function loadAndSetModel( modelKey ) {
 
-		if ( c.material ) c.material.map = null;
+		const entry = MODEL_LIST[ modelKey ];
+		if ( ! entry || ! entry.url ) return;
+		if ( currentModel ) scene.remove( currentModel );
+		loader.setPercentage( 0 );
+		const dracoLoader = new DRACOLoader();
+		dracoLoader.setDecoderPath( 'https://www.gstatic.com/draco/versioned/decoders/1.5.7/' );
+		const gltf = await new GLTFLoader()
+			.setDRACOLoader( dracoLoader )
+			.setMeshoptDecoder( MeshoptDecoder )
+			.loadAsync( entry.url );
+		dracoLoader.dispose();
+		const model = gltf.scene;
+		if ( entry.postProcess ) entry.postProcess( model );
+		model.traverse( c => { if ( c.material ) c.material.map = null; } );
+		model.updateMatrixWorld( true );
+		const box = new Box3();
+		box.setFromObject( model );
+		model.position.y -= box.min.y;
+		scene.add( model );
+		currentModel = model;
+		scene.updateMatrixWorld( true );
+		await pathTracer.setSceneAsync( scene, camera, { onProgress: v => loader.setPercentage( v ) } );
+		loader.setCredits( entry.credit || '' );
+	}
 
-	} );
-
-	gltf.scene.updateMatrixWorld( true );
-	box.setFromObject( gltf.scene );
-	gltf.scene.position.y -= box.min.y;
-	scene.add( gltf.scene );
+	await loadAndSetModel( params.model );
 
 	// set the floor
 	const floorGeom = new CylinderGeometry( 3.5, 3.5, 0.05, 60 );
@@ -127,10 +139,9 @@ async function init() {
 		}
 	} );
 
-	loader.setCredits( CREDITS );
-
 	// gui
 	const gui = new GUI();
+	gui.add( params, 'model', Object.keys( MODEL_LIST ).sort() ).onChange( async ( v ) => { await loadAndSetModel( v ); } );
 	const ptFolder = gui.addFolder( 'Path Tracer' );
 	ptFolder.add( params, 'tiles', 1, 4, 1 ).onChange( value => {
 
