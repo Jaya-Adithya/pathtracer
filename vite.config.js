@@ -33,7 +33,7 @@ export default {
 	root: './example/',
 	base: '',
 	build: {
-		outDir: './bundle/',
+		outDir: '../bundle/',
 		sourcemap: true,
 		rollupOptions: {
 			input: fs
