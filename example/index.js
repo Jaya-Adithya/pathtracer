@@ -112,6 +112,9 @@ const params = {
 	environmentRotation: 0,
 	environmentSaturation: 1.0,
 
+	productSaturation: 1.0,
+	productContrast: 1.0,
+
 	cameraProjection: 'Perspective',
 	focalLength: 35,
 
@@ -543,6 +546,8 @@ function onParamsChange() {
 	pathTracer.bounces = params.bounces;
 	pathTracer.filterGlossyFactor = params.filterGlossyFactor;
 	pathTracer.renderScale = params.renderScale;
+	pathTracer.productSaturation = params.productSaturation;
+	pathTracer.productContrast = params.productContrast;
 
 	floorPlane.material.color.set(params.floorColor);
 	floorPlane.material.roughness = params.floorRoughness;
@@ -1328,6 +1333,8 @@ function buildGui() {
 
 	});
 	pathTracingFolder.add(params, 'focalLength', 15, 100, 1).onChange(onParamsChange).name('Focal length (mm)');
+	pathTracingFolder.add(params, 'productSaturation', 0, 2, 0.01).onChange(onParamsChange).name('Product saturation');
+	pathTracingFolder.add(params, 'productContrast', 0.5, 2, 0.01).onChange(onParamsChange).name('Product contrast');
 	const renderImageController = pathTracingFolder.add({
 		renderImage: () => {
 

@@ -148,6 +148,9 @@ export class WebGLPathTracer {
 	rasterizeSceneCallback: ( scene: Scene, camera: Camera ) => void;
 	renderToCanvasCallback: ( target: WebGLRenderTarget, renderer: WebGLRenderer, quad: FullScreenQuad ) => void;
 
+	productSaturation: number;
+	productContrast: number;
+
 	setBVHWorker( bvhWorker: BVHWorker ): void;
 	setScene(
 		scene: Scene,

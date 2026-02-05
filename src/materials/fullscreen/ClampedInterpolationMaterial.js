@@ -33,6 +33,30 @@ export class ClampedInterpolationMaterial extends ShaderMaterial {
 
 	}
 
+	get saturation() {
+
+		return this.uniforms?.saturation?.value ?? 1;
+
+	}
+
+	set saturation( v ) {
+
+		if ( this.uniforms?.saturation ) this.uniforms.saturation.value = v;
+
+	}
+
+	get contrast() {
+
+		return this.uniforms?.contrast?.value ?? 1;
+
+	}
+
+	set contrast( v ) {
+
+		if ( this.uniforms?.contrast ) this.uniforms.contrast.value = v;
+
+	}
+
 	constructor( params ) {
 
 		super( {
@@ -40,6 +64,8 @@ export class ClampedInterpolationMaterial extends ShaderMaterial {
 
 				map: { value: null },
 				opacity: { value: 1 },
+				saturation: { value: 1 },
+				contrast: { value: 1 },
 
 			},
 
@@ -56,6 +82,8 @@ export class ClampedInterpolationMaterial extends ShaderMaterial {
 			fragmentShader: /* glsl */`
 				uniform sampler2D map;
 				uniform float opacity;
+				uniform float saturation;
+				uniform float contrast;
 				varying vec2 vUv;
 
 				vec4 clampedTexelFatch( sampler2D map, ivec2 px, int lod ) {
@@ -98,6 +126,15 @@ export class ClampedInterpolationMaterial extends ShaderMaterial {
 					);
 
 					gl_FragColor = mix( p1, p2, alpha.y );
+
+					// product saturation (1 = unchanged, 0 = grayscale, >1 = more vivid)
+					float lum = dot( gl_FragColor.rgb, vec3( 0.2126, 0.7152, 0.0722 ) );
+					gl_FragColor.rgb = mix( vec3( lum ), gl_FragColor.rgb, saturation );
+
+					// product contrast (1 = unchanged, >1 = more contrast)
+					gl_FragColor.rgb = ( gl_FragColor.rgb - 0.5 ) * contrast + 0.5;
+					gl_FragColor.rgb = clamp( gl_FragColor.rgb, 0.0, 1.0 );
+
 					gl_FragColor.a *= opacity;
 					#include <premultiplied_alpha_fragment>
 

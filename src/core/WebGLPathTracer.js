@@ -117,6 +117,30 @@ export class WebGLPathTracer {
 
 	}
 
+	get productSaturation() {
+
+		return this._quad.material.saturation;
+
+	}
+
+	set productSaturation( v ) {
+
+		this._quad.material.saturation = v;
+
+	}
+
+	get productContrast() {
+
+		return this._quad.material.contrast;
+
+	}
+
+	set productContrast( v ) {
+
+		this._quad.material.contrast = v;
+
+	}
+
 	constructor( renderer ) {
 
 		// members
