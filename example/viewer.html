@@ -38,10 +38,29 @@
 				border-color: white;
 				opacity: 1;
 			}
+
+			#hub-link {
+				position: fixed;
+				top: 12px;
+				right: 12px;
+				left: auto;
+				z-index: 10000;
+				font-size: 13px;
+				font-family: system-ui, sans-serif;
+			}
+			#hub-link a {
+				color: #111;
+				text-decoration: none;
+				background: rgba(255,255,255,0.9);
+				padding: 6px 10px;
+				border-radius: 6px;
+			}
+			#hub-link a:hover { background: #fff; }
 		</style>
 
 	</head>
 	<body>
+		<nav id="hub-link"><a href="hub.html">← All examples</a></nav>
 		<div id="drop-zone">Drop GLTF/GLB file here</div>
 		<script src="./viewer.js" type="module"></script>
 	</body>
