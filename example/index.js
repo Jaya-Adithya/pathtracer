@@ -19,6 +19,8 @@ import {
 	TextureLoader,
 	Color,
 	Vector3,
+	Vector2,
+	Raycaster,
 	MathUtils,
 	SRGBColorSpace,
 	LinearMipmapLinearFilter,
@@ -42,7 +44,7 @@ import { GUI } from 'three/examples/jsm/libs/lil-gui.module.min.js';
 import Stats from 'three/examples/jsm/libs/stats.module.js';
 import { generateRadialFloorTexture } from './utils/generateRadialFloorTexture.js';
 import { MODEL_LIST } from './utils/modelList.js';
-import { GradientEquirectTexture, WebGLPathTracer } from '../src/index.js';
+import { GradientEquirectTexture, WebGLPathTracer, PhysicalCamera } from '../src/index.js';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { getScaledSettings } from './utils/getScaledSettings.js';
 import { LoaderElement } from './utils/LoaderElement.js';
@@ -118,6 +120,14 @@ const params = {
 	cameraProjection: 'Perspective',
 	focalLength: 35,
 
+	// Depth of Field controls
+	enableDoF: false,
+	focusDistance: 5,
+	fStop: 1.4,
+	apertureBlades: 6,
+	apertureRotation: 0,
+	anamorphicRatio: 1,
+
 	backgroundType: 'Gradient',
 	bgGradientTop: '#111111',
 	bgGradientBottom: '#000000',
@@ -177,6 +187,10 @@ let imageRenderModal = null; // Image render modal instance
 // Pause state: distinguish user-paused vs auto-paused (reached target samples)
 let _autoPausedDueToSamples = false;
 let enableController = null; // GUI controller for params.enable (Path Tracer checkbox)
+
+// Click-to-focus for DoF
+let sceneBvh = null; // BVH from setSceneAsync for raycasting
+const focusMouse = new Vector2(); // Mouse position for click-to-focus
 // Environment rotation slider: pause path tracer while dragging so rotation is visible in raster view
 let _envRotationDragging = false;
 let _envRotPrevEnable = null;
@@ -276,10 +290,16 @@ async function init() {
 
 	};
 
-	// camera
+	// camera (using PhysicalCamera for DoF support)
 	const aspect = window.innerWidth / window.innerHeight;
-	perspectiveCamera = new PerspectiveCamera(60, aspect, 0.025, 500);
+	perspectiveCamera = new PhysicalCamera(60, aspect, 0.025, 500);
 	perspectiveCamera.position.set(- 1, 0.25, 1);
+	// Initialize DoF settings from params
+	perspectiveCamera.focusDistance = params.focusDistance;
+	perspectiveCamera.fStop = params.enableDoF ? params.fStop : 1e10; // Very high fStop disables DoF (bokehSize≈0)
+	perspectiveCamera.apertureBlades = params.apertureBlades;
+	perspectiveCamera.apertureRotation = params.apertureRotation;
+	perspectiveCamera.anamorphicRatio = params.anamorphicRatio;
 
 	const orthoHeight = orthoWidth / aspect;
 	orthoCamera = new OrthographicCamera(orthoWidth / - 2, orthoWidth / 2, orthoHeight / 2, orthoHeight / - 2, 0, 100);
@@ -380,6 +400,10 @@ async function init() {
 
 	window.addEventListener('resize', onResize);
 	window.addEventListener('hashchange', onHashChange);
+
+	// Click-to-focus for Depth of Field
+	window.addEventListener('pointerdown', onFocusPointerDown);
+	window.addEventListener('pointerup', onFocusPointerUp);
 
 }
 
@@ -584,6 +608,14 @@ function onParamsChange() {
 
 	}
 
+	// Sync Depth of Field settings to camera
+	perspectiveCamera.focusDistance = params.focusDistance;
+	perspectiveCamera.fStop = params.enableDoF ? params.fStop : 1e10; // Very high fStop disables DoF
+	perspectiveCamera.apertureBlades = params.apertureBlades;
+	perspectiveCamera.apertureRotation = params.apertureRotation;
+	perspectiveCamera.anamorphicRatio = params.anamorphicRatio;
+	pathTracer.updateCamera();
+
 	pathTracer.updateMaterials();
 	pathTracer.updateEnvironment();
 
@@ -687,7 +719,8 @@ async function endBackgroundDrag() {
 
 	// Rebuild path tracer scene because contentGroup transforms changed
 	scene.updateMatrixWorld(true);
-	await pathTracer.setSceneAsync(scene, activeCamera);
+	const bgResult = await pathTracer.setSceneAsync(scene, activeCamera);
+	sceneBvh = bgResult?.bvh || null;
 	resetPathTracerAndResumeIfAutoPaused();
 
 }
@@ -1119,6 +1152,53 @@ function onResize() {
 
 }
 
+// ============================================================
+// Click-to-Focus for Depth of Field
+// Click on any point in the scene to set focus distance
+// ============================================================
+
+function onFocusPointerDown( e ) {
+
+	focusMouse.set( e.clientX, e.clientY );
+
+}
+
+function onFocusPointerUp( e ) {
+
+	// Only trigger on small mouse movements (click, not drag)
+	const deltaMouse = Math.abs( focusMouse.x - e.clientX ) + Math.abs( focusMouse.y - e.clientY );
+	if ( deltaMouse < 5 && sceneBvh && params.enableDoF ) {
+
+		const raycaster = new Raycaster();
+		raycaster.setFromCamera( {
+			x: ( e.clientX / window.innerWidth ) * 2 - 1,
+			y: - ( e.clientY / window.innerHeight ) * 2 + 1,
+		}, activeCamera );
+
+		const hit = sceneBvh.raycastFirst( raycaster.ray );
+		if ( hit ) {
+
+			params.focusDistance = Math.max( 0.1, hit.distance - activeCamera.near );
+			perspectiveCamera.focusDistance = params.focusDistance;
+			pathTracer.updateCamera();
+
+			// Update the GUI slider to reflect the new value
+			if ( gui ) {
+
+				gui.controllersRecursive().forEach( c => {
+
+					if ( c.property === 'focusDistance' ) c.updateDisplay();
+
+				} );
+
+			}
+
+		}
+
+	}
+
+}
+
 function buildGui() {
 
 	if (gui) {
@@ -1169,7 +1249,8 @@ function buildGui() {
 
 				try {
 
-					await pathTracer.setSceneAsync( scene, activeCamera );
+					const animResult = await pathTracer.setSceneAsync( scene, activeCamera );
+					sceneBvh = animResult?.bvh || null;
 					pathTracer.updateCamera();
 					resetPathTracerAndResumeIfAutoPaused();
 
@@ -1269,7 +1350,8 @@ function buildGui() {
 			scene.updateMatrixWorld( true );
 			try {
 
-				await pathTracer.setSceneAsync( scene, activeCamera );
+				const colorResult = await pathTracer.setSceneAsync( scene, activeCamera );
+				sceneBvh = colorResult?.bvh || null;
 
 			} catch ( e ) {
 
@@ -1313,7 +1395,7 @@ function buildGui() {
 		renderer.toneMapping = v ? ACESFilmicToneMapping : NoToneMapping;
 
 	});
-	pathTracingFolder.add(params, 'bounces', 1, 20, 1).onChange(onParamsChange);
+	pathTracingFolder.add(params, 'bounces', 1, 30, 1).onChange(onParamsChange);
 	pathTracingFolder.add(params, 'filterGlossyFactor', 0, 1).onChange(onParamsChange);
 	// Allow very high internal resolution up to 8x (can be heavy on GPU)
 	pathTracingFolder.add(params, 'renderScale', 0.1, 2.0, 0.01).onChange(() => {
@@ -1363,6 +1445,16 @@ function buildGui() {
 
 	}
 	pathTracingFolder.open();
+
+	// Depth of Field controls
+	const dofFolder = gui.addFolder('Depth of Field');
+	dofFolder.add(params, 'enableDoF').name('Enable DoF').onChange(onParamsChange);
+	dofFolder.add(params, 'focusDistance', 0.1, 50, 0.1).name('Focus Distance').onChange(onParamsChange);
+	dofFolder.add(params, 'fStop', 0.5, 22, 0.1).name('f-Stop (Aperture)').onChange(onParamsChange);
+	dofFolder.add(params, 'apertureBlades', 0, 10, 1).name('Aperture Blades').onChange(onParamsChange);
+	dofFolder.add(params, 'apertureRotation', 0, Math.PI, 0.01).name('Aperture Rotation').onChange(onParamsChange);
+	dofFolder.add(params, 'anamorphicRatio', 0.5, 2, 0.01).name('Anamorphic Ratio').onChange(onParamsChange);
+	dofFolder.close();
 
 	const environmentFolder = gui.addFolder('environment');
 	environmentFolder.add(params, 'envMap', envMaps).name('map').onChange(updateEnvMap);
@@ -2564,7 +2656,7 @@ async function updateWallpaperVisibility(selectedWallpaper) {
 	scene.updateMatrixWorld(true);
 
 	// Rebuild the scene - this will use traverseVisible() which only includes visible meshes
-	await pathTracer.setSceneAsync(scene, activeCamera, {
+	const visResult = await pathTracer.setSceneAsync(scene, activeCamera, {
 		onProgress: (v) => {
 
 			if (v === 1) {
@@ -2575,6 +2667,7 @@ async function updateWallpaperVisibility(selectedWallpaper) {
 
 		}
 	});
+	sceneBvh = visResult?.bvh || null; // Update BVH for click-to-focus
 
 }
 
@@ -3178,11 +3271,12 @@ async function updateModel() {
 
 	// 5. Now build the path tracer scene ONCE with correct visibility + animation pose
 	scene.updateMatrixWorld(true);
-	await pathTracer.setSceneAsync(scene, activeCamera, {
+	const sceneResult = await pathTracer.setSceneAsync(scene, activeCamera, {
 
 		onProgress: v => loader.setPercentage(0.5 + 0.5 * v),
 
 	});
+	sceneBvh = sceneResult?.bvh || null; // Store BVH for click-to-focus
 	// Compile path tracer material before first frame (reduces GPU load)
 	await pathTracer.compileAsync();
 	// Two rAFs after compile so we don't show + first path trace in the same frame as compile
