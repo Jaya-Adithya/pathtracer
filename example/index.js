@@ -51,8 +51,6 @@ import { LDrawConditionalLineMaterial } from 'three/addons/materials/LDrawCondit
 import { ImageRenderModal } from './ImageRenderModal.js';
 import './ImageRenderModal.css';
 
-
-
 const envMaps = {
 	'Royal Esplanade': 'https://raw.githubusercontent.com/mrdoob/three.js/r150/examples/textures/equirectangular/royal_esplanade_1k.hdr',
 	'Moonless Golf': 'https://raw.githubusercontent.com/mrdoob/three.js/r150/examples/textures/equirectangular/moonless_golf_1k.hdr',

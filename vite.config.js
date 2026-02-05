@@ -11,7 +11,9 @@ function copyAssetsPlugin() {
 		name: 'copy-assets',
 		writeBundle( options, _bundle ) {
 
-			const outDir = path.resolve( __dirname, options.dir || 'bundle' );
+			const outDir = path.isAbsolute( options.dir )
+				? options.dir
+				: path.resolve( __dirname, options.dir || 'example/bundle' );
 			const assetsSrc = path.resolve( __dirname, 'example', 'assets' );
 			const assetsDest = path.join( outDir, 'assets' );
 			if ( ! fs.existsSync( assetsSrc ) ) return;
@@ -31,7 +33,7 @@ export default {
 	root: './example/',
 	base: '',
 	build: {
-		outDir: './bundle/',
+		outDir: './example/bundle/',
 		sourcemap: true,
 		rollupOptions: {
 			input: fs
