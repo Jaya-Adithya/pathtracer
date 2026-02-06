@@ -25,7 +25,7 @@ export const MODEL_LIST = {
 		credit: 'Custom Model',
 	},
 	'Flexera Folding PT New': {
-		url: assetUrl( '../assets/Flexera_Folding_PT_V15.glb' ),
+		url: assetUrl( '../assets/Flexera_Folding_PT_V2.glb' ),
 		credit: 'Custom Model',
 	},
 	'ITUS': {
