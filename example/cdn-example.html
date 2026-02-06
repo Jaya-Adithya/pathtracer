@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Path Tracer — CDN Example (2 files only)</title>
+<style>
+	* { margin: 0; padding: 0; box-sizing: border-box; }
+	body { background: #111; overflow: hidden; }
+	canvas { display: block; width: 100vw; height: 100vh; }
+	#info {
+		position: fixed; top: 16px; left: 16px;
+		color: #aaa; font: 14px/1.4 system-ui, sans-serif;
+		background: rgba(0,0,0,0.6); padding: 12px 16px; border-radius: 8px;
+		pointer-events: none; z-index: 10;
+	}
+	#info strong { color: #fff; }
+</style>
+</head>
+<body>
+
+<div id="info">
+	<strong>CDN Path Tracer</strong><br>
+	Only 2 script files needed:<br>
+	1 &bull; three.js (CDN)<br>
+	2 &bull; three-pathtracer.cdn.js
+</div>
+
+<!--
+  ============================================================
+  FILE 1: three.js from CDN
+  ============================================================
+-->
+<script src="https://cdn.jsdelivr.net/npm/three@0.181.0/build/three.min.js"></script>
+
+<!--
+  ============================================================
+  FILE 2: Path Tracer + DOF bundle (includes three-mesh-bvh)
+  ============================================================
+  For local development:
+-->
+<script src="../build/three-pathtracer.cdn.js"></script>
+<!--
+  For production CDN (after publishing):
+  <script src="https://cdn.jsdelivr.net/npm/three-gpu-pathtracer@latest/build/three-pathtracer.cdn.js"></script>
+-->
+
+<script>
+// Everything is available on the ThreePathTracer global + THREE global
+const {
+	WebGLPathTracer,
+	PhysicalCamera,
+	GradientEquirectTexture,
+} = ThreePathTracer;
+
+// --- Setup ---
+const renderer = new THREE.WebGLRenderer( { antialias: true } );
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+document.body.appendChild( renderer.domElement );
+
+const scene = new THREE.Scene();
+
+// PhysicalCamera (includes DOF support)
+const camera = new PhysicalCamera( 60, window.innerWidth / window.innerHeight, 0.01, 500 );
+camera.position.set( 0, 1, 4 );
+camera.lookAt( 0, 0, 0 );
+
+// DOF settings (optional — enabled automatically via PhysicalCamera)
+camera.focusDistance = 4;
+camera.fStop = 1.4;
+camera.apertureBlades = 6;
+
+// Simple scene: a sphere on a plane
+const sphereGeo = new THREE.SphereGeometry( 0.8, 64, 64 );
+const sphereMat = new THREE.MeshStandardMaterial( { color: 0x3388ff, roughness: 0.1, metalness: 0.8 } );
+const sphere = new THREE.Mesh( sphereGeo, sphereMat );
+sphere.position.y = 0.8;
+scene.add( sphere );
+
+const planeGeo = new THREE.PlaneGeometry( 10, 10 );
+const planeMat = new THREE.MeshStandardMaterial( { color: 0x888888, roughness: 0.5 } );
+const plane = new THREE.Mesh( planeGeo, planeMat );
+plane.rotation.x = - Math.PI / 2;
+scene.add( plane );
+
+// Environment light
+const envTex = new GradientEquirectTexture();
+envTex.topColor.set( 0x445566 );
+envTex.bottomColor.set( 0x111111 );
+envTex.update();
+scene.environment = envTex;
+
+// --- Path Tracer ---
+const pathTracer = new WebGLPathTracer( renderer );
+pathTracer.tiles.set( 2, 2 );
+pathTracer.bounces = 8;
+
+// GPU-safe loading: setSceneAsync → compileAsync → render
+( async () => {
+
+	await pathTracer.setSceneAsync( scene, camera );
+	await pathTracer.compileAsync();
+
+	// Give GPU breathing room after compilation
+	await new Promise( r => requestAnimationFrame( r ) );
+	await new Promise( r => requestAnimationFrame( r ) );
+
+	// Start at low scale and ramp up
+	pathTracer.renderScale = 0.5;
+	setTimeout( () => { pathTracer.renderScale = 1.0; }, 2000 );
+
+	function onResize() {
+
+		const w = window.innerWidth;
+		const h = window.innerHeight;
+		renderer.setSize( w, h );
+		renderer.setPixelRatio( window.devicePixelRatio );
+		camera.aspect = w / h;
+		camera.updateProjectionMatrix();
+		pathTracer.updateCamera();
+
+	}
+	window.addEventListener( 'resize', onResize );
+	onResize();
+
+	// Render loop
+	function animate() {
+
+		requestAnimationFrame( animate );
+		pathTracer.renderSample();
+
+	}
+	animate();
+
+} )();
+</script>
+</body>
+</html>

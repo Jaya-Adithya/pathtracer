@@ -100,8 +100,7 @@ const params = {
 	multipleImportanceSampling: true,
 	acesToneMapping: true,
 	...getScaledSettings(),
-	renderScale: 2.0,
-	tiles: 5,
+	renderScale: 2, // default full-quality preview; interactivity still reduces scale during orbit
 
 	model: '',
 
@@ -191,10 +190,17 @@ let imageRenderModal = null; // Image render modal instance
 let _autoPausedDueToSamples = false;
 let enableController = null; // GUI controller for params.enable (Path Tracer checkbox)
 
+// Model loading guard: prevent animate() from rendering while model/BVH/shaders are loading
+let _modelLoading = false;
+
 // Lock Scene: freeze camera position, DOF click-to-focus, and model drag/zoom
 // so the user cannot accidentally lose their composition. GUI controls still work normally.
 let _sceneLocked = false;
 let _lockController = null; // GUI controller for the lock toggle
+
+// Orbit interaction: debounce reset + lower renderScale during drag for responsiveness
+let _orbitResetTimeout = null;
+let _orbitInteracting = false;
 
 // Click-to-focus for DoF
 let sceneBvh = null; // BVH from setSceneAsync for raycasting
@@ -251,6 +257,23 @@ async function init() {
 	renderer.toneMapping = ACESFilmicToneMapping;
 	renderer.toneMappingExposure = 1.0;
 	renderer.outputColorSpace = SRGBColorSpace;
+
+	// GPU context loss detection and recovery
+	renderer.domElement.addEventListener( 'webglcontextlost', ( e ) => {
+
+		e.preventDefault();
+		console.error( 'WebGL context lost — GPU may be exhausted. Pausing rendering.' );
+		_modelLoading = true; // block rendering
+		if ( loader ) loader.setPercentage( 0 );
+
+	} );
+	renderer.domElement.addEventListener( 'webglcontextrestored', () => {
+
+		console.warn( 'WebGL context restored — reloading scene.' );
+		_modelLoading = false;
+		onHashChange(); // reload current model
+
+	} );
 
 	// Wrap canvas + CSS background overlay in a container (like StudioX)
 	const canvasContainer = document.createElement( 'div' );
@@ -326,9 +349,26 @@ async function init() {
 	controls.addEventListener( 'change', () => {
 
 		if ( _sceneLocked ) return;
+
+		// Drop to low renderScale during active orbit for responsiveness
+		if ( ! _orbitInteracting ) {
+
+			_orbitInteracting = true;
+			pathTracer.renderScale = Math.min( params.renderScale, 0.5 );
+
+		}
+
 		pathTracer.updateCamera();
-		// Reset accumulation for new view and resume if we had auto-paused at target samples
-		resetPathTracerAndResumeIfAutoPaused();
+
+		// Debounce the expensive accumulation reset — avoids resetting every single frame
+		clearTimeout( _orbitResetTimeout );
+		_orbitResetTimeout = setTimeout( () => {
+
+			_orbitInteracting = false;
+			pathTracer.renderScale = params.renderScale; // restore full quality
+			resetPathTracerAndResumeIfAutoPaused();
+
+		}, 80 );
 
 	} );
 
@@ -429,7 +469,7 @@ function animate() {
 
 	stats.update();
 
-	if ( ! model ) {
+	if ( ! model || _modelLoading ) {
 
 		return;
 
@@ -592,6 +632,9 @@ function syncSceneEnvironmentFromParams() {
 
 // Sync the environment rotation to all materials in the scene (preset, custom, or BG-as-HDRI).
 // Three.js WebGLRenderer uses material.envMapRotation for reflection sampling.
+// Reusable Euler for environment rotation — avoids allocating a new object per call
+const _envRotationEuler = new Euler();
+
 function syncMaterialEnvMapRotation() {
 
 	if ( ! model ) return;
@@ -599,8 +642,8 @@ function syncMaterialEnvMapRotation() {
 	// Same rotation for all HDRI sources so raster and path tracer match
 	const rotationY = params.environmentRotation;
 
-	// Create an Euler with the rotation
-	const envRotation = new Euler( 0, rotationY, 0 );
+	_envRotationEuler.set( 0, rotationY, 0 );
+	const envRotation = _envRotationEuler;
 
 	// Update all materials in the model
 	model.traverse( ( child ) => {
@@ -672,16 +715,21 @@ function onParamsChange() {
 		const filmHeight = 24;
 		perspectiveCamera.fov = MathUtils.radToDeg( 2 * Math.atan( ( filmHeight / 2 ) / params.focalLength ) );
 		perspectiveCamera.updateProjectionMatrix();
-		pathTracer.updateCamera();
 
 	}
 
 	// Sync Depth of Field settings to camera
-	perspectiveCamera.focusDistance = params.focusDistance;
 	perspectiveCamera.fStop = params.enableDoF ? params.fStop : 1e10; // Very high fStop disables DoF
-	perspectiveCamera.apertureBlades = params.apertureBlades;
-	perspectiveCamera.apertureRotation = params.apertureRotation;
-	perspectiveCamera.anamorphicRatio = params.anamorphicRatio;
+	if ( params.enableDoF ) {
+
+		perspectiveCamera.focusDistance = params.focusDistance;
+		perspectiveCamera.apertureBlades = params.apertureBlades;
+		perspectiveCamera.apertureRotation = params.apertureRotation;
+		perspectiveCamera.anamorphicRatio = params.anamorphicRatio;
+
+	}
+
+	// Single camera update covers both focal length and DOF changes
 	pathTracer.updateCamera();
 
 	pathTracer.updateMaterials();
@@ -1110,7 +1158,7 @@ function updateBackgroundHDRIIntensity() {
 
 	scene.environmentIntensity = params.environmentIntensity;
 	pathTracer.updateEnvironment();
-	resetPathTracerAndResumeIfAutoPaused();
+	// No accumulation reset needed — intensity is a scalar, updateEnvironment handles it
 
 }
 
@@ -1869,7 +1917,7 @@ function buildGui() {
 				} );
 
 				pathTracer.updateMaterials();
-				resetPathTracerAndResumeIfAutoPaused();
+				// No accumulation reset — emissiveIntensity is a material property, updateMaterials handles it
 
 			}
 
@@ -3212,6 +3260,9 @@ async function handleImageUpload( file ) {
 
 async function updateModel() {
 
+	// Block animate() from rendering while we load/compile — prevents GPU exhaustion
+	_modelLoading = true;
+
 	if ( gui ) {
 
 		document.body.classList.remove( 'checkerboard' );
@@ -3250,6 +3301,19 @@ async function updateModel() {
 		model = null;
 
 	}
+
+	// Clean up stale references from previous model
+	wallpaperMeshes = {};
+	screenMesh = null;
+	if ( uploadedTexture ) {
+
+		uploadedTexture.dispose();
+		uploadedTexture = null;
+
+	}
+
+	uploadedImage = null;
+	sceneBvh = null;
 
 	// Yield one frame so we don't start load in the same frame as dispose (reduces GPU/main-thread burst)
 	await new Promise( r => requestAnimationFrame( r ) );
@@ -3508,20 +3572,54 @@ async function updateModel() {
 
 	}
 
-	// Yield one frame after model ready so geometry merge doesn't run in same tick as post-load traversals
+	// Yield two frames after model ready so geometry merge doesn't run in same tick as post-load traversals
+	await new Promise( r => requestAnimationFrame( r ) );
 	await new Promise( r => requestAnimationFrame( r ) );
 
 	// 5. Now build the path tracer scene ONCE with correct visibility + animation pose
+	// _modelLoading is still true — animate() won't try to render during this heavy GPU work
 	scene.updateMatrixWorld( true );
-	const sceneResult = await pathTracer.setSceneAsync( scene, activeCamera, {
 
-		onProgress: v => loader.setPercentage( 0.5 + 0.5 * v ),
+	let sceneResult;
+	try {
 
-	} );
+		sceneResult = await pathTracer.setSceneAsync( scene, activeCamera, {
+
+			onProgress: v => loader.setPercentage( 0.5 + 0.5 * v ),
+
+		} );
+
+	} catch ( e ) {
+
+		console.error( 'setSceneAsync failed — GPU may be exhausted:', e );
+		_modelLoading = false;
+		return;
+
+	}
+
 	sceneBvh = sceneResult?.bvh || null; // Store BVH for click-to-focus
+
+	// Yield frames between setSceneAsync and compileAsync so GPU can flush texture uploads
+	await new Promise( r => requestAnimationFrame( r ) );
+	await new Promise( r => requestAnimationFrame( r ) );
+	await new Promise( r => requestAnimationFrame( r ) );
+
 	// Compile path tracer material before first frame (reduces GPU load)
-	await pathTracer.compileAsync();
-	// Two rAFs after compile so we don't show + first path trace in the same frame as compile
+	try {
+
+		await pathTracer.compileAsync();
+
+	} catch ( e ) {
+
+		console.error( 'compileAsync failed — GPU may be exhausted:', e );
+		_modelLoading = false;
+		return;
+
+	}
+
+	// Four rAFs after compile to give the GPU time to finish shader linking before rendering
+	await new Promise( r => requestAnimationFrame( r ) );
+	await new Promise( r => requestAnimationFrame( r ) );
 	await new Promise( r => requestAnimationFrame( r ) );
 	await new Promise( r => requestAnimationFrame( r ) );
 
@@ -3539,15 +3637,29 @@ async function updateModel() {
 	buildGui();
 	onParamsChange();
 
-	// Start at lower scale and higher delay to avoid GPU exhaustion on first frames
-	pathTracer.renderScale = 0.5;
-	pathTracer.renderDelay = 500;
+	// Progressive GPU ramp-up: start at very low scale/high delay, step up gradually
+	// This prevents the GPU from being slammed with full-resolution path tracing immediately
+	pathTracer.renderScale = 0.25;
+	pathTracer.renderDelay = 800;
+
+	// Allow animate() to start rendering now (at low scale)
+	_modelLoading = false;
+
+	// Step 1: after 1.5s bump to half scale
+	setTimeout( () => {
+
+		pathTracer.renderScale = 0.5;
+		pathTracer.renderDelay = 400;
+
+	}, 1500 );
+
+	// Step 2: after 3.5s move to full user-selected scale
 	setTimeout( () => {
 
 		pathTracer.renderDelay = 100;
 		pathTracer.renderScale = params.renderScale;
 
-	}, 3000 );
+	}, 3500 );
 
 	renderer.domElement.style.visibility = 'visible';
 	if ( params.checkerboardTransparency ) {

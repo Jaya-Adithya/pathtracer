@@ -32,6 +32,7 @@
   "devDependencies": {
     "@lookingglass/webxr": "^0.6.0",
     "@monogrid/gainmap-js": "^3.0.5",
+    "@rollup/plugin-node-resolve": "^16.0.3",
     "@types/node": "^24.3.1",
     "@types/three": "^0.181.0",
     "@typescript-eslint/eslint-plugin": "^8.40.0",
@@ -64,6 +65,7 @@
     "update-screenshots": "node ./scripts/push-screenshots.js",
     "screenshot-diff": "node ./scripts/regression-test.js",
     "build": "rollup -c",
+    "build:cdn": "rollup -c rollup.config.cdn.js",
     "lint": "eslint \"./src/**/*.{js,ts}\" \"./example/*.js\" && tsc --noEmit",
     "prepublishOnly": "npm run build"
   },

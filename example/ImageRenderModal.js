@@ -412,11 +412,11 @@ export class ImageRenderModal {
 
 			console.log( `📐 [Render] Renderer size: ${width}x${height}, renderScale set to 1.0 for rendering (was ${originalRenderScale})` );
 
-			// Apply optimal settings for rendering
-			// Set tiles to 1 for maximum rendering speed (faster than higher tile counts)
-			// Keep all other settings (bounces, renderScale, filterGlossyFactor, etc.)
-			// from the GUI controls - these are already applied and should be preserved
-			this.pathTracer.tiles.set( 1, 1 );
+			// Apply optimal settings for final render quality (overrides preview settings)
+			this.pathTracer.tiles.set( 1, 1 ); // Single tile for maximum rendering speed
+			this.pathTracer.bounces = 30; // Maximum bounces for full GI accuracy
+			this.pathTracer.filterGlossyFactor = 0; // No glossy filtering — exact reflections
+			this.pathTracer.multipleImportanceSampling = true; // Always use MIS for best convergence
 
 			// CRITICAL: Check current resolution FIRST - don't resize if not needed
 			const currentWidth = this.renderer.domElement.width;
