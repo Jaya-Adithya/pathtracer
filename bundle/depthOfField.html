@@ -1,0 +1,96 @@
+<html>
+	<head>
+		<title>Camera Depth of Field</title>
+		<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+		<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' fill='%23111'/></svg>">
+
+		<style>
+			html, body {
+				margin: 0;
+				padding: 0;
+				background-color: #111;
+			}
+
+			#model-info {
+				position: absolute;
+				bottom: 0;
+				left: 0;
+				font-family: 'Courier New', Courier, monospace;
+				color: white;
+				pointer-events: none;
+			}
+
+			#samples, #credits, #instructions {
+
+				opacity: 0.75;
+				background-color: rgba( 0.0, 0.0, 0.0, 0.5 );
+				padding: 5px;
+				display: inline-block;
+
+			}
+
+			#loading {
+				position: absolute;
+				left: 50%;
+				top: 50%;
+				transform: translate(-50%, -50%);
+				color: white;
+				font-family: 'Courier New', Courier, monospace;
+			}
+
+			#description {
+				position: absolute;
+				top: 0;
+				width: 100%;
+				color: white;
+				font-family: monospace;
+				text-align: center;
+				padding: 5px 0;
+				pointer-events: none;
+			}
+
+			#hub-link {
+				position: fixed;
+				top: 12px;
+				right: 12px;
+				left: auto;
+				z-index: 10000;
+				font-size: 13px;
+				font-family: system-ui, sans-serif;
+			}
+			#hub-link a {
+				color: #111;
+				text-decoration: none;
+				background: rgba(255,255,255,0.9);
+				padding: 6px 10px;
+				border-radius: 6px;
+			}
+			#hub-link a:hover { background: #fff; }
+		</style>
+
+		<script type="module" crossorigin src="./assets/depthOfField-kxPziq0k.js"></script>
+		<link rel="modulepreload" crossorigin href="./assets/modulepreload-polyfill-B5Qt9EMX.js">
+		<link rel="modulepreload" crossorigin href="./assets/MaterialBase-D0apYRZI.js">
+		<link rel="modulepreload" crossorigin href="./assets/BufferGeometryUtils-B2ZswfaJ.js">
+		<link rel="modulepreload" crossorigin href="./assets/GLTFLoader-CZoURFu4.js">
+		<link rel="modulepreload" crossorigin href="./assets/DRACOLoader-Y9SiWgF2.js">
+		<link rel="modulepreload" crossorigin href="./assets/OrbitControls-QPbjf6RX.js">
+		<link rel="modulepreload" crossorigin href="./assets/HDRLoader-QyionP9_.js">
+		<link rel="modulepreload" crossorigin href="./assets/meshopt_decoder.module-j6OW_3Rk.js">
+		<link rel="modulepreload" crossorigin href="./assets/lil-gui.module.min-BH_YJbPT.js">
+		<link rel="modulepreload" crossorigin href="./assets/getScaledSettings-nzgggDDj.js">
+		<link rel="modulepreload" crossorigin href="./assets/LoaderElement-DklLdAaa.js">
+		<link rel="modulepreload" crossorigin href="./assets/FogVolumeMaterial-BAhPC4Ul.js">
+		<link rel="modulepreload" crossorigin href="./assets/modelList-BunZDs6G.js">
+		<link rel="modulepreload" crossorigin href="./assets/pcg.glsl-D_3-p9wz.js">
+		<link rel="modulepreload" crossorigin href="./assets/ggx_functions.glsl-Bslli_qd.js">
+		<link rel="modulepreload" crossorigin href="./assets/PathTracingRenderer-CqRsglCw.js">
+		<link rel="modulepreload" crossorigin href="./assets/WebGLPathTracer-BkY-ibNS.js">
+		<link rel="modulepreload" crossorigin href="./assets/BlurredEnvMapGenerator-DwfiHKYk.js">
+		<link rel="modulepreload" crossorigin href="./assets/GenerateMeshBVHWorker-CSNZTU94.js">
+		<link rel="modulepreload" crossorigin href="./assets/ParallelMeshBVHWorker-C6VKfx-V.js">
+	</head>
+	<body>
+		<nav id="hub-link"><a href="hub.html">← All examples</a></nav>
+	</body>
+</html>

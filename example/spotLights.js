@@ -139,7 +139,11 @@ async function init() {
 		if ( entry.postProcess ) entry.postProcess( model );
 		model.scale.setScalar( 1 );
 		model.updateMatrixWorld();
-		model.traverse( c => { c.castShadow = true; c.receiveShadow = true; } );
+		model.traverse( c => {
+
+			c.castShadow = true; c.receiveShadow = true;
+
+		} );
 		scene.add( model );
 		currentModel = model;
 		const box = new Box3();
@@ -150,6 +154,7 @@ async function init() {
 		scene.updateMatrixWorld( true );
 		await pathTracer.setSceneAsync( scene, camera, { onProgress: v => loader.setPercentage( v ) } );
 		loader.setCredits( entry.credit || '' );
+
 	}
 
 	await loadAndSetModel( params.model );
@@ -190,7 +195,11 @@ async function init() {
 
 	// gui
 	const gui = new GUI();
-	gui.add( params, 'model', Object.keys( MODEL_LIST ).sort() ).onChange( async ( v ) => { await loadAndSetModel( v ); } );
+	gui.add( params, 'model', Object.keys( MODEL_LIST ).sort() ).onChange( async ( v ) => {
+
+		await loadAndSetModel( v );
+
+	} );
 	const ptFolder = gui.addFolder( 'Path Tracing' );
 	ptFolder.add( params, 'multipleImportanceSampling' ).onChange( onParamsChange );
 	ptFolder.add( params, 'tiles', 1, 4, 1 ).onChange( value => {

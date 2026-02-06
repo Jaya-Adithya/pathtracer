@@ -6,7 +6,7 @@
 
 export class ImageRenderModal {
 
-	constructor(pathTracer, renderer, scene, camera) {
+	constructor( pathTracer, renderer, scene, camera ) {
 
 		this.pathTracer = pathTracer;
 		this.renderer = renderer;
@@ -46,21 +46,21 @@ export class ImageRenderModal {
 
 		// Resolution map
 		this.resolutions = {
-			'1K': { '16:9': [1920, 1080], '1:1': [1920, 1920], '4:3': [1920, 1440] },
-			'2K': { '16:9': [2560, 1440], '1:1': [2560, 2560], '4:3': [2560, 1920] },
-			'4K': { '16:9': [3840, 2160], '1:1': [3840, 3840], '4:3': [3840, 2880] },
-			'8K': { '16:9': [7680, 4320], '1:1': [7680, 7680], '4:3': [7680, 5760] },
+			'1K': { '16:9': [ 1920, 1080 ], '1:1': [ 1920, 1920 ], '4:3': [ 1920, 1440 ] },
+			'2K': { '16:9': [ 2560, 1440 ], '1:1': [ 2560, 2560 ], '4:3': [ 2560, 1920 ] },
+			'4K': { '16:9': [ 3840, 2160 ], '1:1': [ 3840, 3840 ], '4:3': [ 3840, 2880 ] },
+			'8K': { '16:9': [ 7680, 4320 ], '1:1': [ 7680, 7680 ], '4:3': [ 7680, 5760 ] },
 			// 16K removed: 15360x8640 = 132.7 MP exceeds safe 64 MP limit and causes WebGL context loss
 			// Maximum safe resolution is 8K (7680x4320 = 33.2 MP)
 		};
 
 		// Get GPU maximum texture size
 		const gl = this.renderer.getContext();
-		this.maxTextureSize = gl.getParameter(gl.MAX_TEXTURE_SIZE);
-		this.maxRenderbufferSize = gl.getParameter(gl.MAX_RENDERBUFFER_SIZE);
-		this.maxSize = Math.min(this.maxTextureSize, this.maxRenderbufferSize);
+		this.maxTextureSize = gl.getParameter( gl.MAX_TEXTURE_SIZE );
+		this.maxRenderbufferSize = gl.getParameter( gl.MAX_RENDERBUFFER_SIZE );
+		this.maxSize = Math.min( this.maxTextureSize, this.maxRenderbufferSize );
 
-		console.log(`🎮 GPU Limits: Max Texture Size: ${this.maxTextureSize}, Max Renderbuffer Size: ${this.maxRenderbufferSize}, Using: ${this.maxSize}`);
+		console.log( `🎮 GPU Limits: Max Texture Size: ${this.maxTextureSize}, Max Renderbuffer Size: ${this.maxRenderbufferSize}, Using: ${this.maxSize}` );
 
 		this.createModal();
 		this.attachEventListeners();
@@ -142,13 +142,13 @@ export class ImageRenderModal {
 		`;
 
 		// Add modal to body if it doesn't exist
-		if (!document.getElementById('imageRenderModal')) {
+		if ( ! document.getElementById( 'imageRenderModal' ) ) {
 
-			document.body.insertAdjacentHTML('beforeend', modalHTML);
+			document.body.insertAdjacentHTML( 'beforeend', modalHTML );
 
 		}
 
-		this.modal = document.getElementById('imageRenderModal');
+		this.modal = document.getElementById( 'imageRenderModal' );
 		this.updateSamplesDisplay();
 
 	}
@@ -156,65 +156,65 @@ export class ImageRenderModal {
 	attachEventListeners() {
 
 		// Close button
-		document.getElementById('closeModalBtn').addEventListener('click', () => this.close());
-		document.getElementById('cancelBtn').addEventListener('click', () => this.close());
+		document.getElementById( 'closeModalBtn' ).addEventListener( 'click', () => this.close() );
+		document.getElementById( 'cancelBtn' ).addEventListener( 'click', () => this.close() );
 
 		// Overlay click
-		this.modal.querySelector('.modal-overlay').addEventListener('click', () => this.close());
+		this.modal.querySelector( '.modal-overlay' ).addEventListener( 'click', () => this.close() );
 
 		// Render button
-		document.getElementById('renderBtn').addEventListener('click', () => this.handleRender());
+		document.getElementById( 'renderBtn' ).addEventListener( 'click', () => this.handleRender() );
 
 		// Samples slider
-		document.getElementById('samples').addEventListener('input', (e) => {
+		document.getElementById( 'samples' ).addEventListener( 'input', ( e ) => {
 
-			this.settings.targetSamples = parseInt(e.target.value);
+			this.settings.targetSamples = parseInt( e.target.value );
 			this.updateSamplesDisplay();
 
-		});
+		} );
 
 		// Stop & capture: stop sample accumulation and capture at current samples
-		document.getElementById('stopAndCaptureBtn').addEventListener('click', () => {
+		document.getElementById( 'stopAndCaptureBtn' ).addEventListener( 'click', () => {
 
-			if (this.isRendering) this.stopRequested = true;
+			if ( this.isRendering ) this.stopRequested = true;
 
-		});
+		} );
 
 		// Settings changes
-		['resolution', 'aspectRatio', 'format', 'backgroundMode', 'fileName'].forEach(id => {
+		[ 'resolution', 'aspectRatio', 'format', 'backgroundMode', 'fileName' ].forEach( id => {
 
-			document.getElementById(id).addEventListener('change', (e) => {
+			document.getElementById( id ).addEventListener( 'change', ( e ) => {
 
-				this.settings[id === 'fileName' ? 'fileName' : id] = e.target.value;
+				this.settings[ id === 'fileName' ? 'fileName' : id ] = e.target.value;
 
-			});
+			} );
 
-		});
+		} );
 
 		// ESC key to close
-		document.addEventListener('keydown', (e) => {
+		document.addEventListener( 'keydown', ( e ) => {
 
-			if (e.key === 'Escape' && this.isOpen) {
+			if ( e.key === 'Escape' && this.isOpen ) {
 
 				this.close();
 
 			}
 
-		});
+		} );
 
 	}
 
 	updateSamplesDisplay() {
 
 		const value = this.settings.targetSamples;
-		document.getElementById('samplesValue').textContent = value.toLocaleString();
-		document.getElementById('samples').value = value;
+		document.getElementById( 'samplesValue' ).textContent = value.toLocaleString();
+		document.getElementById( 'samples' ).value = value;
 
 	}
 
 	open() {
 
-		if (this.onOpen) this.onOpen();
+		if ( this.onOpen ) this.onOpen();
 		this.isOpen = true;
 		this.modal.style.display = 'flex';
 		document.body.style.overflow = 'hidden';
@@ -223,9 +223,9 @@ export class ImageRenderModal {
 
 	close() {
 
-		if (this.isRendering) {
+		if ( this.isRendering ) {
 
-			if (!confirm('Rendering in progress. Are you sure you want to cancel?')) {
+			if ( ! confirm( 'Rendering in progress. Are you sure you want to cancel?' ) ) {
 
 				return;
 
@@ -238,28 +238,28 @@ export class ImageRenderModal {
 		this.isOpen = false;
 		this.modal.style.display = 'none';
 		document.body.style.overflow = '';
-		if (this.onClose) this.onClose();
+		if ( this.onClose ) this.onClose();
 
 	}
 
 	async handleRender() {
 
-		if (this.isRendering) return;
+		if ( this.isRendering ) return;
 
 		// Turn path tracer back on so canvas accumulates and we can capture (main point of render)
-		if (this.onBeforeRender) this.onBeforeRender();
+		if ( this.onBeforeRender ) this.onBeforeRender();
 
 		this.isRendering = true;
 		this.stopRequested = false;
-		const renderBtn = document.getElementById('renderBtn');
-		const stopBtn = document.getElementById('stopAndCaptureBtn');
-		const progressDiv = document.getElementById('renderProgress');
-		const progressFill = document.getElementById('progressFill');
-		const progressText = document.getElementById('progressText');
+		const renderBtn = document.getElementById( 'renderBtn' );
+		const stopBtn = document.getElementById( 'stopAndCaptureBtn' );
+		const progressDiv = document.getElementById( 'renderProgress' );
+		const progressFill = document.getElementById( 'progressFill' );
+		const progressText = document.getElementById( 'progressText' );
 
 		renderBtn.disabled = true;
 		renderBtn.style.display = 'none';
-		if (stopBtn) stopBtn.style.display = 'inline-block';
+		if ( stopBtn ) stopBtn.style.display = 'inline-block';
 		progressDiv.style.display = 'block';
 
 		try {
@@ -272,32 +272,32 @@ export class ImageRenderModal {
 			const bgImageH = window.backgroundImageNaturalHeight || 0;
 
 			// Get target dimensions
-			const res = this.resolutions[this.settings.resolution];
-			let [width, height] = res[this.settings.aspectRatio];
+			const res = this.resolutions[ this.settings.resolution ];
+			let [ width, height ] = res[ this.settings.aspectRatio ];
 
 			// If "with background" and we have image dimensions, preserve background aspect ratio
-			if (shouldCaptureBackground && bgImageSrc && bgImageW > 0 && bgImageH > 0) {
+			if ( shouldCaptureBackground && bgImageSrc && bgImageW > 0 && bgImageH > 0 ) {
 
 				const bgAspect = bgImageW / bgImageH;
 				const baseAspect = width / height;
 
-				if (bgAspect > baseAspect) {
+				if ( bgAspect > baseAspect ) {
 
-					height = Math.round(width / bgAspect);
+					height = Math.round( width / bgAspect );
 
 				} else {
 
-					width = Math.round(height * bgAspect);
+					width = Math.round( height * bgAspect );
 
 				}
 
-				console.log(`🎨 [Render] Adjusted to background aspect ratio: ${width}x${height} (image: ${bgImageW}x${bgImageH})`);
+				console.log( `🎨 [Render] Adjusted to background aspect ratio: ${width}x${height} (image: ${bgImageW}x${bgImageH})` );
 
 			}
 
 			// Transparent background handling
-			let originalBackground = this.scene.background;
-			let originalClearAlpha = this.renderer.getClearAlpha();
+			const originalBackground = this.scene.background;
+			const originalClearAlpha = this.renderer.getClearAlpha();
 			let didSetTransparent = false;
 
 			// PNG + "without background" = auto transparent PNG (no need for separate checkbox)
@@ -307,7 +307,7 @@ export class ImageRenderModal {
 				this.renderer.setClearAlpha( 0 );
 				this.pathTracer.updateEnvironment();
 				didSetTransparent = true;
-				console.log( `🎨 [Render] PNG without background — transparent background auto-enabled` );
+				console.log( '🎨 [Render] PNG without background — transparent background auto-enabled' );
 
 			} else if ( shouldCaptureBackground && bgImageSrc ) {
 
@@ -316,7 +316,7 @@ export class ImageRenderModal {
 				this.renderer.setClearAlpha( 0 );
 				this.pathTracer.updateEnvironment();
 				didSetTransparent = true;
-				console.log( `🎨 [Render] With background — set transparent for compositing` );
+				console.log( '🎨 [Render] With background — set transparent for compositing' );
 
 			}
 
@@ -324,7 +324,7 @@ export class ImageRenderModal {
 			const originalWidth = width;
 			const originalHeight = height;
 
-			console.log(`📐 [Render] Initial resolution: ${width}x${height}, GPU max: ${this.maxSize}`);
+			console.log( `📐 [Render] Initial resolution: ${width}x${height}, GPU max: ${this.maxSize}` );
 
 			// CRITICAL: Check total pixel count to prevent context loss (matches reference implementation)
 			const totalPixels = width * height;
@@ -332,42 +332,42 @@ export class ImageRenderModal {
 			const maxMemoryPixels = 8192 * 8192; // 64MP absolute limit (matches reference)
 
 			// Check pixel count limits first (prevents context loss)
-			if (totalPixels > maxMemoryPixels) {
+			if ( totalPixels > maxMemoryPixels ) {
 
 				// Calculate safe resolution that fits within memory limit
-				const safeScale = Math.sqrt(maxMemoryPixels / totalPixels);
-				const newWidth = Math.floor(width * safeScale);
-				const newHeight = Math.floor(height * safeScale);
+				const safeScale = Math.sqrt( maxMemoryPixels / totalPixels );
+				const newWidth = Math.floor( width * safeScale );
+				const newHeight = Math.floor( height * safeScale );
 
 				const errorMsg = `Resolution ${this.settings.resolution} (${originalWidth}x${originalHeight}, ${totalPixels.toLocaleString()} pixels) exceeds memory limit (${maxMemoryPixels.toLocaleString()} pixels). Maximum safe resolution is 8192x8192. Clamping to ${newWidth}x${newHeight}`;
-				console.error(errorMsg);
+				console.error( errorMsg );
 				progressText.textContent = errorMsg;
-				alert(errorMsg + '\n\nPlease select a lower resolution (8K or below).');
+				alert( errorMsg + '\n\nPlease select a lower resolution (8K or below).' );
 
 				width = newWidth;
 				height = newHeight;
 
-			} else if (totalPixels > maxSafePixels) {
+			} else if ( totalPixels > maxSafePixels ) {
 
-				console.warn(`⚠️ High resolution detected: ${width}x${height} (${totalPixels.toLocaleString()} pixels). This may cause performance issues or context loss.`);
+				console.warn( `⚠️ High resolution detected: ${width}x${height} (${totalPixels.toLocaleString()} pixels). This may cause performance issues or context loss.` );
 				progressText.textContent = `Preparing render at ${width}x${height}... (High resolution - may be slow)`;
 
-			} else if (width > this.maxSize || height > this.maxSize) {
+			} else if ( width > this.maxSize || height > this.maxSize ) {
 
 				// Check GPU texture/renderbuffer limits
-				const scale = Math.min(this.maxSize / width, this.maxSize / height);
-				const newWidth = Math.floor(width * scale);
-				const newHeight = Math.floor(height * scale);
+				const scale = Math.min( this.maxSize / width, this.maxSize / height );
+				const newWidth = Math.floor( width * scale );
+				const newHeight = Math.floor( height * scale );
 
-				console.log(`📐 [Render] Clamping: scale=${scale.toFixed(4)}, ${width}x${height} -> ${newWidth}x${newHeight}`);
+				console.log( `📐 [Render] Clamping: scale=${scale.toFixed( 4 )}, ${width}x${height} -> ${newWidth}x${newHeight}` );
 
 				width = newWidth;
 				height = newHeight;
 
 				const warningMsg = `⚠️ Resolution ${this.settings.resolution} (${originalWidth}x${originalHeight}) exceeds GPU limit (${this.maxSize}). Clamping to ${width}x${height}`;
-				console.warn(warningMsg);
+				console.warn( warningMsg );
 				progressText.textContent = warningMsg;
-				alert(warningMsg + '\n\nPlease select a lower resolution.');
+				alert( warningMsg + '\n\nPlease select a lower resolution.' );
 
 			} else {
 
@@ -376,20 +376,20 @@ export class ImageRenderModal {
 			}
 
 			// Double-check dimensions are valid (should never fail after clamping, but safety check)
-			if (width <= 0 || height <= 0 || width > this.maxSize || height > this.maxSize) {
+			if ( width <= 0 || height <= 0 || width > this.maxSize || height > this.maxSize ) {
 
-				throw new Error(`Invalid resolution: ${width}x${height}. Maximum supported: ${this.maxSize}x${this.maxSize}`);
+				throw new Error( `Invalid resolution: ${width}x${height}. Maximum supported: ${this.maxSize}x${this.maxSize}` );
 
 			}
 
-			console.log(`📐 [Render] Final target resolution: ${width}x${height} (clamped from ${originalWidth}x${originalHeight})`);
+			console.log( `📐 [Render] Final target resolution: ${width}x${height} (clamped from ${originalWidth}x${originalHeight})` );
 
 			// Store original renderer CSS size (NOT drawing buffer size)
 			// renderer.domElement.width/height = CSS size × pixelRatio (drawing buffer)
 			// renderer.setSize() expects CSS pixels and multiplies by pixelRatio internally
 			this.originalPixelRatio = this.renderer.getPixelRatio();
-			this.originalSize.width = Math.round(this.renderer.domElement.width / this.originalPixelRatio);
-			this.originalSize.height = Math.round(this.renderer.domElement.height / this.originalPixelRatio);
+			this.originalSize.width = Math.round( this.renderer.domElement.width / this.originalPixelRatio );
+			this.originalSize.height = Math.round( this.renderer.domElement.height / this.originalPixelRatio );
 
 			// Store original path tracer settings (to restore after rendering)
 			this.originalSettings.tiles.x = this.pathTracer.tiles.x;
@@ -402,7 +402,7 @@ export class ImageRenderModal {
 			this.originalSettings.textureSize = this.pathTracer.textureSize.clone();
 
 			// Bump texture atlas to full 4K for final render quality
-			this.pathTracer.textureSize.set(4096, 4096);
+			this.pathTracer.textureSize.set( 4096, 4096 );
 
 			// CRITICAL: Account for renderScale when checking GPU limits
 			// The path tracer multiplies renderer size by renderScale to get actual render target size
@@ -410,60 +410,60 @@ export class ImageRenderModal {
 			const originalRenderScale = this.pathTracer.renderScale;
 			this.pathTracer.renderScale = 1.0; // Use 1:1 scale for rendering to avoid GPU limit issues
 
-			console.log(`📐 [Render] Renderer size: ${width}x${height}, renderScale set to 1.0 for rendering (was ${originalRenderScale})`);
+			console.log( `📐 [Render] Renderer size: ${width}x${height}, renderScale set to 1.0 for rendering (was ${originalRenderScale})` );
 
 			// Apply optimal settings for rendering
 			// Set tiles to 1 for maximum rendering speed (faster than higher tile counts)
-			// Keep all other settings (bounces, renderScale, filterGlossyFactor, etc.) 
+			// Keep all other settings (bounces, renderScale, filterGlossyFactor, etc.)
 			// from the GUI controls - these are already applied and should be preserved
-			this.pathTracer.tiles.set(1, 1);
+			this.pathTracer.tiles.set( 1, 1 );
 
 			// CRITICAL: Check current resolution FIRST - don't resize if not needed
 			const currentWidth = this.renderer.domElement.width;
 			const currentHeight = this.renderer.domElement.height;
 
-			console.log(`📐 [Path Tracer] Current resolution: ${currentWidth}x${currentHeight}`);
-			console.log(`📐 [Path Tracer] Target resolution: ${width}x${height}`);
+			console.log( `📐 [Path Tracer] Current resolution: ${currentWidth}x${currentHeight}` );
+			console.log( `📐 [Path Tracer] Target resolution: ${width}x${height}` );
 
 			// STEP 1: Only resize if resolution doesn't match
-			if (currentWidth !== width || currentHeight !== height) {
+			if ( currentWidth !== width || currentHeight !== height ) {
 
-				console.log(`📐 [Path Tracer] Resolution mismatch - resizing from ${currentWidth}x${currentHeight} to ${width}x${height}`);
+				console.log( `📐 [Path Tracer] Resolution mismatch - resizing from ${currentWidth}x${currentHeight} to ${width}x${height}` );
 				progressText.textContent = `Resizing path tracer to ${width}x${height}...`;
 
 				// Check WebGL context before resizing (prevent context loss)
 				const gl = this.renderer.getContext();
-				if (gl && gl.isContextLost && gl.isContextLost()) {
+				if ( gl && gl.isContextLost && gl.isContextLost() ) {
 
-					throw new Error('WebGL context has been lost. Please refresh the page and try again.');
+					throw new Error( 'WebGL context has been lost. Please refresh the page and try again.' );
 
 				}
 
 				// Resize renderer (dimensions should already be clamped, but double-check)
-				if (width > this.maxSize || height > this.maxSize) {
+				if ( width > this.maxSize || height > this.maxSize ) {
 
-					throw new Error(`Cannot resize renderer to ${width}x${height}. GPU maximum is ${this.maxSize}x${this.maxSize}. This should have been clamped earlier.`);
+					throw new Error( `Cannot resize renderer to ${width}x${height}. GPU maximum is ${this.maxSize}x${this.maxSize}. This should have been clamped earlier.` );
 
 				}
 
 				// Resize renderer
-				this.renderer.setSize(width, height);
-				this.renderer.setPixelRatio(1);
+				this.renderer.setSize( width, height );
+				this.renderer.setPixelRatio( 1 );
 
 				// Check context after resize
-				if (gl && gl.isContextLost && gl.isContextLost()) {
+				if ( gl && gl.isContextLost && gl.isContextLost() ) {
 
-					throw new Error(`WebGL context lost after resizing to ${width}x${height}. Resolution too high for your GPU. Please try a lower resolution.`);
+					throw new Error( `WebGL context lost after resizing to ${width}x${height}. Resolution too high for your GPU. Please try a lower resolution.` );
 
 				}
 
 				// Update camera aspect ratio
-				if (this.camera.isPerspectiveCamera) {
+				if ( this.camera.isPerspectiveCamera ) {
 
 					this.camera.aspect = width / height;
 					this.camera.updateProjectionMatrix();
 
-				} else if (this.camera.isOrthographicCamera) {
+				} else if ( this.camera.isOrthographicCamera ) {
 
 					// For orthographic cameras, update the frustum size
 					const aspect = width / height;
@@ -476,64 +476,64 @@ export class ImageRenderModal {
 				}
 
 				// Check context before resizing path tracer
-				if (gl && gl.isContextLost && gl.isContextLost()) {
+				if ( gl && gl.isContextLost && gl.isContextLost() ) {
 
-					throw new Error('WebGL context lost before path tracer resize. Please try a lower resolution.');
+					throw new Error( 'WebGL context lost before path tracer resize. Please try a lower resolution.' );
 
 				}
 
 				// Try to resize path tracer instance (EXACTLY like reference implementation)
 				// Note: WebGLPathTracer doesn't have setSize, but internal _pathTracer does
-				if (this.pathTracer._pathTracer && typeof this.pathTracer._pathTracer.setSize === 'function') {
+				if ( this.pathTracer._pathTracer && typeof this.pathTracer._pathTracer.setSize === 'function' ) {
 
-					this.pathTracer._pathTracer.setSize(width, height);
+					this.pathTracer._pathTracer.setSize( width, height );
 
-				} else if (typeof this.pathTracer.setSize === 'function') {
+				} else if ( typeof this.pathTracer.setSize === 'function' ) {
 
-					this.pathTracer.setSize(width, height);
+					this.pathTracer.setSize( width, height );
 
-				} else if (typeof this.pathTracer.resize === 'function') {
+				} else if ( typeof this.pathTracer.resize === 'function' ) {
 
-					this.pathTracer.resize(width, height);
+					this.pathTracer.resize( width, height );
 
-				} else if (this.pathTracer.renderer && typeof this.pathTracer.renderer.setSize === 'function') {
+				} else if ( this.pathTracer.renderer && typeof this.pathTracer.renderer.setSize === 'function' ) {
 
-					this.pathTracer.renderer.setSize(width, height);
+					this.pathTracer.renderer.setSize( width, height );
 
 				}
 
 				// Check context after path tracer resize
-				if (gl && gl.isContextLost && gl.isContextLost()) {
+				if ( gl && gl.isContextLost && gl.isContextLost() ) {
 
-					throw new Error(`WebGL context lost after path tracer resize to ${width}x${height}. Resolution too high. Please try a lower resolution (8K or below).`);
+					throw new Error( `WebGL context lost after path tracer resize to ${width}x${height}. Resolution too high. Please try a lower resolution (8K or below).` );
 
 				}
 
 				// CRITICAL: Update path tracer environment/scene after resize
 				// This ensures the path tracer regenerates its internal buffers
-				if (typeof this.pathTracer.updateEnvironment === 'function') {
+				if ( typeof this.pathTracer.updateEnvironment === 'function' ) {
 
 					this.pathTracer.updateEnvironment();
 
 				}
 
-				if (typeof this.pathTracer.setScene === 'function') {
+				if ( typeof this.pathTracer.setScene === 'function' ) {
 
-					this.pathTracer.setScene(this.scene, this.camera);
+					this.pathTracer.setScene( this.scene, this.camera );
 
 				}
 
 				// Wait a few frames for the path tracer to initialize at new resolution
-				await this.waitFrames(2);
+				await this.waitFrames( 2 );
 
 				// Force a sample render to kickstart accumulation at new resolution
 				this.pathTracer.renderSample();
-				await this.waitFrames(1);
+				await this.waitFrames( 1 );
 
 			} else {
 
-				console.log(`✅ [Path Tracer] Resolution matches - preserving current samples!`);
-				progressText.textContent = `Path tracer resolution matches - checking samples...`;
+				console.log( '✅ [Path Tracer] Resolution matches - preserving current samples!' );
+				progressText.textContent = 'Path tracer resolution matches - checking samples...';
 
 			}
 
@@ -551,19 +551,19 @@ export class ImageRenderModal {
 			this.pathTracer.updateCamera();
 
 			// Wait for target samples
-			if (this.settings.targetSamples > 0) {
+			if ( this.settings.targetSamples > 0 ) {
 
-				await this.waitForSamples(progressFill, progressText);
+				await this.waitForSamples( progressFill, progressText );
 
 			} else {
 
 				// If 0 samples requested, render at least a few to get something visible
 				progressText.textContent = 'Rendering initial samples...';
 				const minSamples = 10; // Minimum samples to ensure something is visible
-				for (let i = 0; i < minSamples; i++) {
+				for ( let i = 0; i < minSamples; i ++ ) {
 
 					this.pathTracer.renderSample();
-					await this.waitFrames(1);
+					await this.waitFrames( 1 );
 
 				}
 
@@ -571,20 +571,20 @@ export class ImageRenderModal {
 
 			// Render final sample to ensure everything is up to date
 			this.pathTracer.renderSample();
-			await this.waitFrames(2);
+			await this.waitFrames( 2 );
 
 			progressText.textContent = 'Capturing image...';
 			progressFill.style.width = '100%';
 
 			// Ensure one final render to canvas before capture
 			this.pathTracer.renderSample();
-			await this.waitFrames(1);
+			await this.waitFrames( 1 );
 
 			// CRITICAL: Check WebGL context before capture
 			const gl = this.renderer.getContext();
-			if (gl && gl.isContextLost && gl.isContextLost()) {
+			if ( gl && gl.isContextLost && gl.isContextLost() ) {
 
-				throw new Error(`WebGL context lost before capture. Resolution ${width}x${height} is too high for your GPU. Please try a lower resolution (8K or below).`);
+				throw new Error( `WebGL context lost before capture. Resolution ${width}x${height} is too high for your GPU. Please try a lower resolution (8K or below).` );
 
 			}
 
@@ -593,39 +593,39 @@ export class ImageRenderModal {
 			let imageData;
 
 			// Verify canvas dimensions match target (matches reference check)
-			if (canvas && canvas.width === width && canvas.height === height) {
+			if ( canvas && canvas.width === width && canvas.height === height ) {
 
-				console.log(`📸 Capturing canvas at ${canvas.width}x${canvas.height}...`);
-				imageData = await this.captureImage(canvas);
+				console.log( `📸 Capturing canvas at ${canvas.width}x${canvas.height}...` );
+				imageData = await this.captureImage( canvas );
 
 			} else {
 
-				console.warn(`⚠️ Canvas size mismatch: expected ${width}x${height}, got ${canvas?.width}x${canvas?.height}`);
+				console.warn( `⚠️ Canvas size mismatch: expected ${width}x${height}, got ${canvas?.width}x${canvas?.height}` );
 
 				// Fallback: try to capture anyway if canvas exists
-				if (!canvas || canvas.width === 0 || canvas.height === 0) {
+				if ( ! canvas || canvas.width === 0 || canvas.height === 0 ) {
 
-					throw new Error(`Canvas has zero dimensions (${canvas?.width}x${canvas?.height}). Please check renderer setup.`);
+					throw new Error( `Canvas has zero dimensions (${canvas?.width}x${canvas?.height}). Please check renderer setup.` );
 
 				}
 
 				// Use actual canvas dimensions
-				console.log(`📸 Capturing canvas at actual size ${canvas.width}x${canvas.height}...`);
-				imageData = await this.captureImage(canvas);
+				console.log( `📸 Capturing canvas at actual size ${canvas.width}x${canvas.height}...` );
+				imageData = await this.captureImage( canvas );
 
 			}
 
 			// Composite the CSS background image behind the transparent path-traced render
-			if (shouldCaptureBackground && bgImageSrc) {
+			if ( shouldCaptureBackground && bgImageSrc ) {
 
 				progressText.textContent = 'Compositing background image...';
-				imageData = await this.compositeWithBackground(imageData, bgImageSrc, canvas.width, canvas.height);
-				console.log(`🎨 [Render] Composited background image`);
+				imageData = await this.compositeWithBackground( imageData, bgImageSrc, canvas.width, canvas.height );
+				console.log( '🎨 [Render] Composited background image' );
 
 			}
 
 			// Download image
-			this.downloadImage(imageData, this.settings.fileName, this.settings.format);
+			this.downloadImage( imageData, this.settings.fileName, this.settings.format );
 
 			progressText.textContent = 'Render complete!';
 
@@ -644,24 +644,24 @@ export class ImageRenderModal {
 
 			}
 
-			setTimeout(() => {
+			setTimeout( () => {
 
 				this.close();
 				this.restoreRenderer();
 
-			}, 1000);
+			}, 1000 );
 
-		} catch (error) {
+		} catch ( error ) {
 
-			console.error('Render error:', error);
+			console.error( 'Render error:', error );
 			progressText.textContent = `Error: ${error.message}`;
-			alert(`Render failed: ${error.message}`);
+			alert( `Render failed: ${error.message}` );
 
 			// Restore background/environment on error
-			if (shouldCaptureBackground && bgImageSrc) {
+			if ( shouldCaptureBackground && bgImageSrc ) {
 
 				this.scene.background = originalBackground;
-				this.renderer.setClearAlpha(originalClearAlpha);
+				this.renderer.setClearAlpha( originalClearAlpha );
 				this.pathTracer.updateEnvironment();
 
 			}
@@ -675,7 +675,7 @@ export class ImageRenderModal {
 			renderBtn.disabled = false;
 			renderBtn.textContent = 'Render';
 			renderBtn.style.display = '';
-			if (document.getElementById('stopAndCaptureBtn')) document.getElementById('stopAndCaptureBtn').style.display = 'none';
+			if ( document.getElementById( 'stopAndCaptureBtn' ) ) document.getElementById( 'stopAndCaptureBtn' ).style.display = 'none';
 
 		}
 
@@ -686,33 +686,33 @@ export class ImageRenderModal {
 		this.isRendering = false;
 		this.stopRequested = false;
 		this.restoreRenderer();
-		document.getElementById('renderProgress').style.display = 'none';
-		document.getElementById('renderBtn').style.display = '';
-		const stopBtn = document.getElementById('stopAndCaptureBtn');
-		if (stopBtn) stopBtn.style.display = 'none';
+		document.getElementById( 'renderProgress' ).style.display = 'none';
+		document.getElementById( 'renderBtn' ).style.display = '';
+		const stopBtn = document.getElementById( 'stopAndCaptureBtn' );
+		if ( stopBtn ) stopBtn.style.display = 'none';
 
 	}
 
-	async waitFrames(count) {
+	async waitFrames( count ) {
 
-		for (let i = 0; i < count; i++) {
+		for ( let i = 0; i < count; i ++ ) {
 
-			await new Promise(resolve => requestAnimationFrame(resolve));
+			await new Promise( resolve => requestAnimationFrame( resolve ) );
 
 		}
 
 	}
 
-	async waitForSamples(progressFill, progressText) {
+	async waitForSamples( progressFill, progressText ) {
 
-		return new Promise((resolve) => {
+		return new Promise( ( resolve ) => {
 
 			const targetSamples = this.settings.targetSamples;
 			let lastUpdate = 0;
 
 			const checkSamples = () => {
 
-				if (!this.isRendering) {
+				if ( ! this.isRendering ) {
 
 					resolve();
 					return;
@@ -720,43 +720,44 @@ export class ImageRenderModal {
 				}
 
 				// User clicked "Stop & capture": exit loop and capture at current samples
-				if (this.stopRequested) {
+				if ( this.stopRequested ) {
 
-					const currentSamples = Math.floor(this.pathTracer.samples);
+					const currentSamples = Math.floor( this.pathTracer.samples );
 					progressText.textContent = `Stopped at ${currentSamples.toLocaleString()} samples — capturing...`;
 					resolve();
 					return;
 
 				}
 
-				const currentSamples = Math.floor(this.pathTracer.samples);
-				const progress = Math.min(100, (currentSamples / targetSamples) * 100);
+				const currentSamples = Math.floor( this.pathTracer.samples );
+				const progress = Math.min( 100, ( currentSamples / targetSamples ) * 100 );
 
 				// Update progress bar
 				progressFill.style.width = `${progress}%`;
 
 				// Update text (throttle to avoid too many updates)
 				const now = Date.now();
-				if (now - lastUpdate > 100) {
+				if ( now - lastUpdate > 100 ) {
 
-					progressText.textContent = `Rendering... ${currentSamples.toLocaleString()} / ${targetSamples.toLocaleString()} samples (${Math.round(progress)}%)`;
+					progressText.textContent = `Rendering... ${currentSamples.toLocaleString()} / ${targetSamples.toLocaleString()} samples (${Math.round( progress )}%)`;
 					lastUpdate = now;
 
 				}
 
-				if (currentSamples >= targetSamples) {
+				if ( currentSamples >= targetSamples ) {
 
 					resolve();
 
 				} else {
 
 					// Continue rendering - ensure path tracer is enabled
-					if (this.pathTracer.enablePathTracing && !this.pathTracer.pausePathTracing) {
+					if ( this.pathTracer.enablePathTracing && ! this.pathTracer.pausePathTracing ) {
 
 						this.pathTracer.renderSample();
 
 					}
-					requestAnimationFrame(checkSamples);
+
+					requestAnimationFrame( checkSamples );
 
 				}
 
@@ -764,33 +765,33 @@ export class ImageRenderModal {
 
 			checkSamples();
 
-		});
+		} );
 
 	}
 
-	async captureImage(canvas) {
+	async captureImage( canvas ) {
 
 		const format = this.settings.format.toUpperCase();
 
-		if (format === 'PNG') {
+		if ( format === 'PNG' ) {
 
-			return canvas.toDataURL('image/png', 1.0);
+			return canvas.toDataURL( 'image/png', 1.0 );
 
-		} else if (format === 'JPG' || format === 'JPEG') {
+		} else if ( format === 'JPG' || format === 'JPEG' ) {
 
 			// Convert PNG to JPG (requires background)
-			return this.convertToJPG(canvas);
+			return this.convertToJPG( canvas );
 
-		} else if (format === 'PSD') {
+		} else if ( format === 'PSD' ) {
 
 			// For PSD, we'll export as PNG with .psd extension
 			// Full PSD support would require a library like psd.js
-			console.warn('PSD format not fully supported, exporting as PNG with .psd extension');
-			return canvas.toDataURL('image/png', 1.0);
+			console.warn( 'PSD format not fully supported, exporting as PNG with .psd extension' );
+			return canvas.toDataURL( 'image/png', 1.0 );
 
 		}
 
-		throw new Error(`Unsupported format: ${format}`);
+		throw new Error( `Unsupported format: ${format}` );
 
 	}
 
@@ -800,128 +801,131 @@ export class ImageRenderModal {
 	 * then the render on top, preserving alpha compositing.
 	 * Returns a data URL of the composited image.
 	 */
-	async compositeWithBackground(renderDataUrl, bgImageSrc, width, height) {
+	async compositeWithBackground( renderDataUrl, bgImageSrc, width, height ) {
 
-		return new Promise((resolve, reject) => {
+		return new Promise( ( resolve, reject ) => {
 
 			const bgImg = new Image();
 			bgImg.onload = () => {
 
-				const tempCanvas = document.createElement('canvas');
+				const tempCanvas = document.createElement( 'canvas' );
 				tempCanvas.width = width;
 				tempCanvas.height = height;
-				const ctx = tempCanvas.getContext('2d');
+				const ctx = tempCanvas.getContext( '2d' );
 
 				// Draw background image — fill canvas using "contain" logic (same as CSS object-fit: contain)
 				const bgAspect = bgImg.width / bgImg.height;
 				const canvasAspect = width / height;
 				let drawW, drawH, drawX, drawY;
 
-				if (bgAspect > canvasAspect) {
+				if ( bgAspect > canvasAspect ) {
 
 					// Image is wider — fit to width
 					drawW = width;
 					drawH = width / bgAspect;
 					drawX = 0;
-					drawY = (height - drawH) / 2;
+					drawY = ( height - drawH ) / 2;
 
 				} else {
 
 					// Image is taller — fit to height
 					drawH = height;
 					drawW = height * bgAspect;
-					drawX = (width - drawW) / 2;
+					drawX = ( width - drawW ) / 2;
 					drawY = 0;
 
 				}
 
 				// Black background fill for letterbox areas
 				ctx.fillStyle = '#000000';
-				ctx.fillRect(0, 0, width, height);
+				ctx.fillRect( 0, 0, width, height );
 
 				// Draw background image
-				ctx.drawImage(bgImg, drawX, drawY, drawW, drawH);
+				ctx.drawImage( bgImg, drawX, drawY, drawW, drawH );
 
 				// Draw the path-traced render on top (with alpha compositing)
 				const renderImg = new Image();
 				renderImg.onload = () => {
 
-					ctx.drawImage(renderImg, 0, 0, width, height);
+					ctx.drawImage( renderImg, 0, 0, width, height );
 
 					const format = this.settings.format.toUpperCase();
-					if (format === 'JPG' || format === 'JPEG') {
+					if ( format === 'JPG' || format === 'JPEG' ) {
 
-						resolve(tempCanvas.toDataURL('image/jpeg', 0.95));
+						resolve( tempCanvas.toDataURL( 'image/jpeg', 0.95 ) );
 
 					} else {
 
-						resolve(tempCanvas.toDataURL('image/png', 1.0));
+						resolve( tempCanvas.toDataURL( 'image/png', 1.0 ) );
 
 					}
 
 				};
+
 				renderImg.onerror = reject;
 				renderImg.src = renderDataUrl;
 
 			};
+
 			bgImg.onerror = reject;
 			bgImg.src = bgImageSrc;
 
-		});
+		} );
 
 	}
 
-	convertToJPG(canvas, quality = 0.95) {
+	convertToJPG( canvas, quality = 0.95 ) {
 
 		// Create a temporary canvas with white background
-		const tempCanvas = document.createElement('canvas');
+		const tempCanvas = document.createElement( 'canvas' );
 		tempCanvas.width = canvas.width;
 		tempCanvas.height = canvas.height;
-		const ctx = tempCanvas.getContext('2d');
+		const ctx = tempCanvas.getContext( '2d' );
 
 		// Fill with white background
 		ctx.fillStyle = '#FFFFFF';
-		ctx.fillRect(0, 0, tempCanvas.width, tempCanvas.height);
+		ctx.fillRect( 0, 0, tempCanvas.width, tempCanvas.height );
 
 		// Draw original canvas on top
-		ctx.drawImage(canvas, 0, 0);
+		ctx.drawImage( canvas, 0, 0 );
 
 		// Convert to JPG
-		return tempCanvas.toDataURL('image/jpeg', quality);
+		return tempCanvas.toDataURL( 'image/jpeg', quality );
 
 	}
 
-	downloadImage(dataUrl, fileName, format) {
+	downloadImage( dataUrl, fileName, format ) {
 
-		const link = document.createElement('a');
+		const link = document.createElement( 'a' );
 		link.download = `${fileName}.${format.toLowerCase()}`;
 		link.href = dataUrl;
-		document.body.appendChild(link);
+		document.body.appendChild( link );
 		link.click();
-		document.body.removeChild(link);
+		document.body.removeChild( link );
 
 	}
 
 	restoreRenderer() {
 
 		// Restore original path tracer settings
-		this.pathTracer.tiles.set(this.originalSettings.tiles.x, this.originalSettings.tiles.y);
+		this.pathTracer.tiles.set( this.originalSettings.tiles.x, this.originalSettings.tiles.y );
 		this.pathTracer.bounces = this.originalSettings.bounces;
 		this.pathTracer.renderScale = this.originalSettings.renderScale; // Restore original renderScale
 		this.pathTracer.filterGlossyFactor = this.originalSettings.filterGlossyFactor;
 		this.pathTracer.multipleImportanceSampling = this.originalSettings.multipleImportanceSampling;
-		if (this.originalSettings.textureSize) {
+		if ( this.originalSettings.textureSize ) {
 
-			this.pathTracer.textureSize.copy(this.originalSettings.textureSize);
+			this.pathTracer.textureSize.copy( this.originalSettings.textureSize );
 			// Repack texture atlas at preview resolution
-			if (typeof this.pathTracer.updateMaterials === 'function') {
+			if ( typeof this.pathTracer.updateMaterials === 'function' ) {
 
 				this.pathTracer.updateMaterials();
 
 			}
 
 		}
-		if (this.originalSettings.toneMapping !== null) {
+
+		if ( this.originalSettings.toneMapping !== null ) {
 
 			this.renderer.toneMapping = this.originalSettings.toneMapping;
 
@@ -931,19 +935,19 @@ export class ImageRenderModal {
 		const restoreW = window.innerWidth;
 		const restoreH = window.innerHeight;
 		const restoreDPR = window.devicePixelRatio;
-		if (restoreW > 0 && restoreH > 0) {
+		if ( restoreW > 0 && restoreH > 0 ) {
 
-			this.renderer.setPixelRatio(restoreDPR);
-			this.renderer.setSize(restoreW, restoreH);
+			this.renderer.setPixelRatio( restoreDPR );
+			this.renderer.setSize( restoreW, restoreH );
 
 			// Update camera aspect (restore to current window)
-			if (this.camera.isPerspectiveCamera) {
+			if ( this.camera.isPerspectiveCamera ) {
 
 				const aspect = restoreW / restoreH;
 				this.camera.aspect = aspect;
 				this.camera.updateProjectionMatrix();
 
-			} else if (this.camera.isOrthographicCamera) {
+			} else if ( this.camera.isOrthographicCamera ) {
 
 				// For orthographic cameras, restore original frustum
 				// Note: Original frustum values aren't stored, so this is a best-effort restore
@@ -955,25 +959,25 @@ export class ImageRenderModal {
 			// Resize path tracer back to match the restored canvas drawing buffer
 			const drawW = restoreW * restoreDPR;
 			const drawH = restoreH * restoreDPR;
-			const w = Math.floor(this.originalSettings.renderScale * drawW);
-			const h = Math.floor(this.originalSettings.renderScale * drawH);
-			if (this.pathTracer._pathTracer && typeof this.pathTracer._pathTracer.setSize === 'function') {
+			const w = Math.floor( this.originalSettings.renderScale * drawW );
+			const h = Math.floor( this.originalSettings.renderScale * drawH );
+			if ( this.pathTracer._pathTracer && typeof this.pathTracer._pathTracer.setSize === 'function' ) {
 
-				this.pathTracer._pathTracer.setSize(w, h);
+				this.pathTracer._pathTracer.setSize( w, h );
 				const lowResScale = this.pathTracer.lowResScale != null ? this.pathTracer.lowResScale : 0.25;
-				if (this.pathTracer._lowResPathTracer && typeof this.pathTracer._lowResPathTracer.setSize === 'function') {
+				if ( this.pathTracer._lowResPathTracer && typeof this.pathTracer._lowResPathTracer.setSize === 'function' ) {
 
-					this.pathTracer._lowResPathTracer.setSize(Math.floor(w * lowResScale), Math.floor(h * lowResScale));
+					this.pathTracer._lowResPathTracer.setSize( Math.floor( w * lowResScale ), Math.floor( h * lowResScale ) );
 
 				}
 
-			} else if (typeof this.pathTracer.setSize === 'function') {
+			} else if ( typeof this.pathTracer.setSize === 'function' ) {
 
-				this.pathTracer.setSize(w, h);
+				this.pathTracer.setSize( w, h );
 
-			} else if (typeof this.pathTracer.resize === 'function') {
+			} else if ( typeof this.pathTracer.resize === 'function' ) {
 
-				this.pathTracer.resize(w, h);
+				this.pathTracer.resize( w, h );
 
 			}
 
@@ -984,7 +988,7 @@ export class ImageRenderModal {
 
 		// Re-sync path tracer with scene (background, env map, clear alpha) so the live canvas
 		// shows the correct background/wallpaper again after render
-		if (typeof this.pathTracer.updateEnvironment === 'function') {
+		if ( typeof this.pathTracer.updateEnvironment === 'function' ) {
 
 			this.pathTracer.updateEnvironment();
 

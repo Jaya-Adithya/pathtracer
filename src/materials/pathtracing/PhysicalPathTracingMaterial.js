@@ -30,15 +30,15 @@ export class PhysicalPathTracingMaterial extends MaterialBase {
 
 	onBeforeRender() {
 
-		this.setDefine('FEATURE_DOF', this.physicalCamera.bokehSize === 0 ? 0 : 1);
-		this.setDefine('FEATURE_BACKGROUND_MAP', this.backgroundMap ? 1 : 0);
-		this.setDefine('FEATURE_FOG', this.materials.features.isUsed('FOG') ? 1 : 0);
+		this.setDefine( 'FEATURE_DOF', this.physicalCamera.bokehSize === 0 ? 0 : 1 );
+		this.setDefine( 'FEATURE_BACKGROUND_MAP', this.backgroundMap ? 1 : 0 );
+		this.setDefine( 'FEATURE_FOG', this.materials.features.isUsed( 'FOG' ) ? 1 : 0 );
 
 	}
 
-	constructor(parameters) {
+	constructor( parameters ) {
 
-		super({
+		super( {
 
 			transparent: true,
 			depthWrite: false,
@@ -94,11 +94,11 @@ export class PhysicalPathTracingMaterial extends MaterialBase {
 				// light uniforms
 				lights: { value: new LightsInfoUniformStruct() },
 				iesProfiles: {
-					value: new RenderTarget2DArray(360, 180, {
+					value: new RenderTarget2DArray( 360, 180, {
 						type: HalfFloatType,
 						wrapS: ClampToEdgeWrapping,
 						wrapT: ClampToEdgeWrapping,
-					}).texture
+					} ).texture
 				},
 				environmentIntensity: { value: 1.0 },
 				environmentRotation: { value: new Matrix4() },
@@ -117,7 +117,7 @@ export class PhysicalPathTracingMaterial extends MaterialBase {
 				seed: { value: 0 },
 				sobolTexture: { value: null },
 				stratifiedTexture: { value: new StratifiedSamplesTexture() },
-				stratifiedOffsetTexture: { value: new BlueNoiseTexture(64, 1) },
+				stratifiedOffsetTexture: { value: new BlueNoiseTexture( 64, 1 ) },
 			},
 
 			vertexShader: /* glsl */`
@@ -690,9 +690,9 @@ export class PhysicalPathTracingMaterial extends MaterialBase {
 
 			`
 
-		});
+		} );
 
-		this.setValues(parameters);
+		this.setValues( parameters );
 
 	}
 

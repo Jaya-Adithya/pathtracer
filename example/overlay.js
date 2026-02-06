@@ -100,7 +100,11 @@ async function init() {
 		dracoLoader.dispose();
 		const model = gltf.scene;
 		if ( entry.postProcess ) entry.postProcess( model );
-		model.traverse( c => { if ( c.material ) c.material.map = null; } );
+		model.traverse( c => {
+
+			if ( c.material ) c.material.map = null;
+
+		} );
 		model.updateMatrixWorld( true );
 		const box = new Box3();
 		box.setFromObject( model );
@@ -110,6 +114,7 @@ async function init() {
 		scene.updateMatrixWorld( true );
 		await pathTracer.setSceneAsync( scene, camera, { onProgress: v => loader.setPercentage( v ) } );
 		loader.setCredits( entry.credit || '' );
+
 	}
 
 	await loadAndSetModel( params.model );
@@ -141,7 +146,11 @@ async function init() {
 
 	// gui
 	const gui = new GUI();
-	gui.add( params, 'model', Object.keys( MODEL_LIST ).sort() ).onChange( async ( v ) => { await loadAndSetModel( v ); } );
+	gui.add( params, 'model', Object.keys( MODEL_LIST ).sort() ).onChange( async ( v ) => {
+
+		await loadAndSetModel( v );
+
+	} );
 	const ptFolder = gui.addFolder( 'Path Tracer' );
 	ptFolder.add( params, 'tiles', 1, 4, 1 ).onChange( value => {
 

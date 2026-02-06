@@ -2078,21 +2078,12 @@
 
 		while ( lower < upper ) {
 
-			// calculate the midpoint for this iteration using a bitwise shift right operator to save 1 floating point multiplication
-			// and 1 truncation from the double tilde operator to improve performance
-			// this results in much better performance over using standard "~ ~ ( (lower + upper) ) / 2" to calculate the midpoint
 			const mid = ( lower + upper ) >> 1;
 
-			// check if the middle array value is above or below the target and shift
-			// which half of the array we're looking at
 			if ( array[ mid ] < targetValue ) {
-
 				lower = mid + 1;
-
 			} else {
-
 				upper = mid;
-
 			}
 
 		}
@@ -2102,10 +2093,8 @@
 	}
 
 	function colorToLuminance( r, g, b ) {
-
 		// https://en.wikipedia.org/wiki/Relative_luminance
 		return 0.2126 * r + 0.7152 * g + 0.0722 * b;
-
 	}
 
 	// ensures the data is all floating point values and flipY is false
@@ -2115,59 +2104,58 @@
 		map.source = new three.Source( { ...map.image } );
 		const { width, height, data } = map.image;
 
-		// TODO: is there a simple way to avoid cloning and adjusting the env map data here?
-		// convert the data from half float uint 16 arrays to float arrays for cdf computation
-		let newData = data;
-		if ( map.type !== targetType ) {
+		// [FIX 1] Calculate stride dynamically (3 for RGB, 4 for RGBA) to prevent data corruption
+		const originalStride = Math.floor( data.length / ( width * height ) );
+
+		// Force copy and sanitization
+		let newData;
+		const targetStride = originalStride;
+
+		if ( targetType === three.HalfFloatType ) {
+			newData = new Uint16Array( data.length );
+		} else {
+			newData = new Float32Array( data.length );
+		}
+
+		let maxIntValue;
+		if ( data instanceof Int8Array || data instanceof Int16Array || data instanceof Int32Array || data instanceof Uint8Array || data instanceof Uint16Array || data instanceof Uint32Array ) {
+			maxIntValue = 2 ** ( 8 * data.BYTES_PER_ELEMENT ) - 1;
+		} else {
+			maxIntValue = 1;
+		}
+
+		// [FIX 2] HalfFloat Max Value. Clamp sun to this instead of 0.
+		const MAX_HALF_FLOAT = 65504.0;
+
+		for ( let i = 0, l = data.length; i < l; i ++ ) {
+
+			let v = data[ i ];
+			if ( map.type === three.HalfFloatType ) {
+				v = three.DataUtils.fromHalfFloat( data[ i ] );
+			}
+
+			if ( map.type !== three.FloatType && map.type !== three.HalfFloatType ) {
+				v /= maxIntValue;
+			}
+
+			// [FIX 2] Robust Sanitization: If Infinity (Sun), clamp to max value. Do not set to 0.
+			if ( ! Number.isFinite( v ) ) {
+				if ( v > 0 ) v = MAX_HALF_FLOAT;
+				else v = 0.0;
+			} else if ( v < 0 ) {
+				v = 0.0;
+			}
 
 			if ( targetType === three.HalfFloatType ) {
-
-				newData = new Uint16Array( data.length );
-
+				newData[ i ] = three.DataUtils.toHalfFloat( v );
 			} else {
-
-				newData = new Float32Array( data.length );
-
+				newData[ i ] = v;
 			}
-
-			let maxIntValue;
-			if ( data instanceof Int8Array || data instanceof Int16Array || data instanceof Int32Array ) {
-
-				maxIntValue = 2 ** ( 8 * data.BYTES_PER_ELEMENT - 1 ) - 1;
-
-			} else {
-
-				maxIntValue = 2 ** ( 8 * data.BYTES_PER_ELEMENT ) - 1;
-
-			}
-
-			for ( let i = 0, l = data.length; i < l; i ++ ) {
-
-				let v = data[ i ];
-				if ( map.type === three.HalfFloatType ) {
-
-					v = three.DataUtils.fromHalfFloat( data[ i ] );
-
-				}
-
-				if ( map.type !== three.FloatType && map.type !== three.HalfFloatType ) {
-
-					v /= maxIntValue;
-
-				}
-
-				if ( targetType === three.HalfFloatType ) {
-
-					newData[ i ] = three.DataUtils.toHalfFloat( v );
-
-				}
-
-			}
-
-			map.image.data = newData;
-			map.type = targetType;
 
 		}
+
+		map.image.data = newData;
+		map.type = targetType;
 
 		// remove any y flipping for cdf computation
 		if ( map.flipY ) {
@@ -2179,13 +2167,13 @@
 				for ( let x = 0; x < width; x ++ ) {
 
 					const newY = height - y - 1;
-					const ogIndex = 4 * ( y * width + x );
-					const newIndex = 4 * ( newY * width + x );
+					// [FIX 3] Use calculated stride for flipping logic
+					const ogIndex = targetStride * ( y * width + x );
+					const newIndex = targetStride * ( newY * width + x );
 
-					newData[ newIndex + 0 ] = ogData[ ogIndex + 0 ];
-					newData[ newIndex + 1 ] = ogData[ ogIndex + 1 ];
-					newData[ newIndex + 2 ] = ogData[ ogIndex + 2 ];
-					newData[ newIndex + 3 ] = ogData[ ogIndex + 3 ];
+					for ( let c = 0; c < targetStride; c ++ ) {
+						newData[ newIndex + c ] = ogData[ ogIndex + c ];
+					}
 
 				}
 
@@ -2204,8 +2192,6 @@
 
 		constructor() {
 
-			// Default to a white texture and associated weights so we don't
-			// just render black initially.
 			const blackTex = new three.DataTexture( toHalfFloatArray( new Float32Array( [ 0, 0, 0, 0 ] ) ), 1, 1 );
 			blackTex.type = three.HalfFloatType;
 			blackTex.format = three.RGBAFormat;
@@ -2216,8 +2202,6 @@
 			blackTex.generateMipmaps = false;
 			blackTex.needsUpdate = true;
 
-			// Stores a map of [0, 1] value -> cumulative importance row & pdf
-			// used to sampling a random value to a relevant row to sample from
 			const marginalWeights = new three.DataTexture( toHalfFloatArray( new Float32Array( [ 0, 1 ] ) ), 1, 2 );
 			marginalWeights.type = three.HalfFloatType;
 			marginalWeights.format = three.RedFormat;
@@ -2226,8 +2210,6 @@
 			marginalWeights.generateMipmaps = false;
 			marginalWeights.needsUpdate = true;
 
-			// Stores a map of [0, 1] value -> cumulative importance column & pdf
-			// used to sampling a random value to a relevant pixel to sample from
 			const conditionalWeights = new three.DataTexture( toHalfFloatArray( new Float32Array( [ 0, 0, 1, 1 ] ) ), 2, 2 );
 			conditionalWeights.type = three.HalfFloatType;
 			conditionalWeights.format = three.RedFormat;
@@ -2241,11 +2223,6 @@
 			this.conditionalWeights = conditionalWeights;
 			this.totalSum = 0;
 
-			// TODO: Add support for float or half float types here. We need to pass this into
-			// the preprocess function and ensure our CDF and MDF textures are appropriately sized
-			// Ideally we wouldn't upscale a bit depth if we didn't need to.
-			// this.type = HalfFloatType;
-
 		}
 
 		dispose() {
@@ -2258,18 +2235,20 @@
 
 		updateFrom( hdr ) {
 
-			// https://github.com/knightcrawler25/GLSL-PathTracer/blob/3c6fd9b6b3da47cd50c527eeb45845eef06c55c3/src/loaders/hdrloader.cpp
-			// https://pbr-book.org/3ed-2018/Light_Transport_I_Surface_Reflection/Sampling_Light_Sources#InfiniteAreaLights
 			const map = preprocessEnvMap( hdr );
 			map.wrapS = three.RepeatWrapping;
 			map.wrapT = three.ClampToEdgeWrapping;
 
 			const { width, height, data } = map.image;
 
-			// "conditional" = "pixel relative to row pixels sum"
-			// "marginal" = "row relative to row sum"
+			if ( ! width || ! height || ! data ) {
+				console.error( 'EquirectHdrInfoUniform: Invalid texture data', map.image );
+				return;
+			}
 
-			// track the importance of any given pixel in the image by tracking its weight relative to other pixels in the image
+			// [FIX 1] Calculate Stride dynamically here as well
+			const stride = Math.floor( data.length / ( width * height ) );
+
 			const pdfConditional = new Float32Array( width * height );
 			const cdfConditional = new Float32Array( width * height );
 
@@ -2284,14 +2263,19 @@
 				for ( let x = 0; x < width; x ++ ) {
 
 					const i = y * width + x;
-					const r = three.DataUtils.fromHalfFloat( data[ 4 * i + 0 ] );
-					const g = three.DataUtils.fromHalfFloat( data[ 4 * i + 1 ] );
-					const b = three.DataUtils.fromHalfFloat( data[ 4 * i + 2 ] );
 
-					// the probability of the pixel being selected in this row is the
-					// scale of the luminance relative to the rest of the pixels.
-					// TODO: this should also account for the solid angle of the pixel when sampling
-					const weight = colorToLuminance( r, g, b );
+					// [FIX 1] Use stride here instead of hardcoded 4
+					let r = three.DataUtils.fromHalfFloat( data[ stride * i + 0 ] );
+					let g = three.DataUtils.fromHalfFloat( data[ stride * i + 1 ] );
+					let b = three.DataUtils.fromHalfFloat( data[ stride * i + 2 ] );
+
+					// Redundant safety check (already handled in preprocess, but good for safety)
+					if ( ! Number.isFinite( r ) || r < 0 ) { r = 0; }
+					if ( ! Number.isFinite( g ) || g < 0 ) { g = 0; }
+					if ( ! Number.isFinite( b ) || b < 0 ) { b = 0; }
+
+					let weight = colorToLuminance( r, g, b );
+					if ( ! Number.isFinite( weight ) || weight < 0 ) weight = 0;
 					cumulativeRowWeight += weight;
 					totalSumValue += weight;
 
@@ -2300,69 +2284,43 @@
 
 				}
 
-				// can happen if the row is all black
 				if ( cumulativeRowWeight !== 0 ) {
-
-					// scale the pdf and cdf to [0.0, 1.0]
 					for ( let i = y * width, l = y * width + width; i < l; i ++ ) {
-
 						pdfConditional[ i ] /= cumulativeRowWeight;
 						cdfConditional[ i ] /= cumulativeRowWeight;
-
 					}
-
 				}
 
 				cumulativeWeightMarginal += cumulativeRowWeight;
 
-				// compute the marginal pdf and cdf along the height of the map.
 				pdfMarginal[ y ] = cumulativeRowWeight;
 				cdfMarginal[ y ] = cumulativeWeightMarginal;
 
 			}
 
-			// can happen if the texture is all black
 			if ( cumulativeWeightMarginal !== 0 ) {
-
-				// scale the marginal pdf and cdf to [0.0, 1.0]
 				for ( let i = 0, l = pdfMarginal.length; i < l; i ++ ) {
-
 					pdfMarginal[ i ] /= cumulativeWeightMarginal;
 					cdfMarginal[ i ] /= cumulativeWeightMarginal;
-
 				}
-
 			}
 
-			// compute a sorted index of distributions and the probabilities along them for both
-			// the marginal and conditional data. These will be used to sample with a random number
-			// to retrieve a uv value to sample in the environment map.
-			// These values continually increase so it's okay to interpolate between them.
 			const marginalDataArray = new Uint16Array( height );
 			const conditionalDataArray = new Uint16Array( width * height );
 
-			// we add a half texel offset so we're sampling the center of the pixel
 			for ( let i = 0; i < height; i ++ ) {
-
 				const dist = ( i + 1 ) / height;
 				const row = binarySearchFindClosestIndexOf( cdfMarginal, dist );
-
 				marginalDataArray[ i ] = three.DataUtils.toHalfFloat( ( row + 0.5 ) / height );
-
 			}
 
 			for ( let y = 0; y < height; y ++ ) {
-
 				for ( let x = 0; x < width; x ++ ) {
-
 					const i = y * width + x;
 					const dist = ( x + 1 ) / width;
 					const col = binarySearchFindClosestIndexOf( cdfConditional, dist, y * width, width );
-
 					conditionalDataArray[ i ] = three.DataUtils.toHalfFloat( ( col + 0.5 ) / width );
-
 				}
-
 			}
 
 			this.dispose();
@@ -2374,7 +2332,12 @@
 			conditionalWeights.image = { width, height, data: conditionalDataArray };
 			conditionalWeights.needsUpdate = true;
 
-			this.totalSum = totalSumValue;
+			this.totalSum = Number.isFinite( totalSumValue ) ? totalSumValue : 0;
+
+			if ( this.totalSum === 0 ) {
+				console.warn( 'EquirectHdrInfoUniform: totalSum is 0. The environment map appears to be black or empty.', { width, height } );
+			}
+
 			this.map = map;
 
 		}
@@ -4791,8 +4754,7 @@
 		lightRec.dist = dist;
 		lightRec.direction = direction;
 
-		// TODO: the denominator is potentially zero
-		lightRec.pdf = lightDistSq / ( light.area * dot( direction, lightNormal ) );
+		lightRec.pdf = lightDistSq / max( light.area * abs( dot( direction, lightNormal ) ), 1e-6 );
 
 		return lightRec;
 
@@ -5550,10 +5512,11 @@
 		float G = ggxShadowMaskG2( wi, wo, roughness );
 		float D = ggxDistribution( wh, roughness );
 		float G1 = ggxShadowMaskG1( incidentTheta, roughness );
-		float ggxPdf = D * G1 * max( 0.0, abs( dot( wo, wh ) ) ) / abs ( wo.z );
+		float denomZ = max( abs( wo.z ), 1e-7 );
+		float ggxPdf = D * G1 * max( 0.0, abs( dot( wo, wh ) ) ) / denomZ;
 
-		color = wi.z * F * G * D / ( 4.0 * abs( wi.z * wo.z ) );
-		return ggxPdf / ( 4.0 * dot( wo, wh ) );
+		color = wi.z * F * G * D / max( 4.0 * abs( wi.z * wo.z ), 1e-7 );
+		return ggxPdf / max( 4.0 * abs( dot( wo, wh ) ), 1e-7 );
 
 	}
 
@@ -5587,7 +5550,7 @@
 		color = surf.transmission * surf.color;
 
 		float denom = pow( eta * dot( wi, wh ) + dot( wo, wh ), 2.0 );
-		return ggxPDF( wo, wh, filteredRoughness ) / denom;
+		return ggxPDF( wo, wh, filteredRoughness ) / max( denom, 1e-7 );
 
 	}
 
@@ -6052,7 +6015,7 @@
 		float D = ggxDistribution( halfVector, roughness );
 		float G1 = ggxShadowMaskG1( incidentTheta, roughness );
 
-		return D * G1 * max( 0.0, dot( wi, halfVector ) ) / wi.z;
+		return D * G1 * max( 0.0, dot( wi, halfVector ) ) / max( abs( wi.z ), 1e-7 );
 
 	}
 
@@ -6686,11 +6649,20 @@ bool bvhIntersectFogVolumeHit(
 			// create the new ray
 			ray.origin += ( cameraWorldMatrix * vec4( apertureSample, 0.0, 0.0 ) ).xyz;
 			ray.direction = focalPoint - ray.origin;
-
+			// avoid division by zero in normalize when origin equals focal point
+			float dirLen = length( ray.direction );
+			if ( dirLen < 1e-6 ) {
+				ray.direction = ( cameraWorldMatrix * vec4( 0.0, 0.0, - 1.0, 0.0 ) ).xyz;
+				ray.direction = normalize( ray.direction );
+			} else {
+				ray.direction /= dirLen;
+			}
 		}
 		#endif
 
+		#if FEATURE_DOF == 0
 		ray.direction = normalize( ray.direction );
+		#endif
 
 		return ray;
 
@@ -6850,12 +6822,11 @@ bool bvhIntersectFogVolumeHit(
 
 		}
 
-		// possibly skip this sample if it's transparent, alpha test is enabled, or we hit the wrong material side
-		// and it's single sided.
-		// - alpha test is disabled when it === 0
-		// - the material sidedness test is complicated because we want light to pass through the back side but still
-		// be able to see the front side. This boolean checks if the side we hit is the front side on the first ray
-		// and we're rendering the other then we skip it. Do the opposite on subsequent bounces to get incoming light.
+		// Hit flag: SKIP_SURFACE = continue ray (transparent); HIT_SURFACE = shade. Solid ground uses hit-flag + alpha
+		// (alpha test or stochastic alpha for PNG transparency) + transmission (refraction/tint in attenuateHit).
+		// Possibly skip if transparent, alpha test enabled, or wrong material side (single sided).
+		// - alpha test disabled when === 0; stochastic alpha: material.transparent && albedo.a < rand(3).
+		// - material sidedness: allow light through back side but still shade front; skip wrong side on first ray.
 		float alphaTest = material.alphaTest;
 		bool useAlphaTest = alphaTest != 0.0;
 		if (
@@ -7306,6 +7277,7 @@ bool bvhIntersectFogVolumeHit(
 					backgroundAlpha: { value: 1.0 },
 					backgroundIntensity: { value: 1.0 },
 					backgroundRotation: { value: new three.Matrix4() },
+					shadowCatcherReflectionIntensity: { value: 1.0 },
 
 					// randomness uniforms
 					seed: { value: 0 },
@@ -7411,6 +7383,7 @@ bool bvhIntersectFogVolumeHit(
 				// background
 				uniform float backgroundBlur;
 				uniform float backgroundAlpha;
+				uniform float shadowCatcherReflectionIntensity;
 				#if FEATURE_BACKGROUND_MAP
 
 				uniform sampler2D backgroundMap;
@@ -7676,94 +7649,92 @@ bool bvhIntersectFogVolumeHit(
 
 						}
 
-						// shadow/reflection catcher: only reflection (geometry) + shadow; no floor color, no env on floor
-						// Uses BSDF sampling so roughness/metalness controls affect the reflection
+						// shadow/reflection catcher: Production Grade V2
+						// Solves wavering ripples (stable Fresnel), double ghosting (transmission mask), black circle (screen-blend alpha)
 						if ( material.shadowReflectionCatcher && state.firstRay ) {
 
 							vec3 hitPoint = stepRayOrigin( ray.origin, ray.direction, surf.faceNormal, surfaceHit.dist );
-							// Roughness-aware reflection via BSDF instead of perfect mirror
+
+							// --- 1. STABLE FRESNEL MASK (prevents "waver" ripples) ---
+							// Use perfect reflection vector so the mask does not jitter with roughness
+							vec3 perfectReflDir = reflect( ray.direction, surf.faceNormal );
+							vec3 stableHalfVector = normalize( - ray.direction + perfectReflDir );
+							float stableDotVH = saturate( dot( - ray.direction, stableHalfVector ) );
+							vec3 f0 = mix( vec3( surf.f0 * surf.specularIntensity ), surf.color, surf.metalness );
+							vec3 transmissionMask = vec3( 1.0 ) - schlickFresnel( stableDotVH, f0 );
+
+							// --- 2. REFLECTION TRACING (roughness-aware ray) ---
 							ScatterRecord catcherScatter = bsdfSample( - ray.direction, surf );
+							vec3 reflectionWeight = vec3( 0.0 );
+							if ( catcherScatter.pdf > 0.0 ) {
+								reflectionWeight = catcherScatter.color / catcherScatter.pdf;
+							}
+							if ( any( isnan( reflectionWeight ) ) || any( isinf( reflectionWeight ) ) ) {
+								reflectionWeight = vec3( 0.0 );
+							}
+
 							vec3 reflDir = catcherScatter.direction;
-							// Ensure reflection goes above surface
 							if ( dot( reflDir, surf.faceNormal ) < 0.0 ) {
 								reflDir = reflect( ray.direction, surf.faceNormal );
 							}
 							Ray reflRay;
 							reflRay.origin = stepRayOrigin( hitPoint, reflDir, surf.faceNormal, 0.0 );
 							reflRay.direction = reflDir;
+
 							SurfaceHit reflHit;
 							int reflHitType = traceScene( reflRay, state.fogMaterial, reflHit );
 							vec3 reflectionColor = vec3( 0.0 );
-							if ( reflHitType == SURFACE_HIT ) {
 
+							if ( reflHitType == SURFACE_HIT ) {
 								uint reflMatIndex = uTexelFetch1D( materialIndexAttribute, reflHit.faceIndices.x ).r;
 								Material reflMat = readMaterialInfo( materials, reflMatIndex );
 								SurfaceRecord reflSurf;
 								if ( getSurfaceRecord( reflMat, reflHit, attributesArray, 0.0, reflSurf ) != SKIP_SURFACE ) {
-
 									vec3 reflHitPoint = stepRayOrigin( reflRay.origin, reflRay.direction, reflSurf.faceNormal, reflHit.dist );
 									reflectionColor = reflSurf.emission + directLightContribution( - reflDir, reflSurf, state, reflHitPoint );
-
 								}
-
 							}
+
+							// --- 3. SHADOW TRACING ---
 							float shadowFactor = 0.0;
 							state.isShadowRay = true;
 							if ( lightsDenom != 0.0 && rand( 9 ) < float( lights.count ) / lightsDenom ) {
-
 								LightRecord lightRec = randomLightSample( lights.tex, iesProfiles, lights.count, hitPoint, rand3( 10 ) );
 								if ( dot( surf.faceNormal, lightRec.direction ) >= 0.0 && lightRec.pdf > 0.0 ) {
-
 									Ray lightRay;
 									lightRay.origin = hitPoint;
 									lightRay.direction = lightRec.direction;
 									vec3 att;
 									if ( attenuateHit( state, lightRay, lightRec.dist, att ) ) shadowFactor = 1.0;
-
 								}
-
 							} else if ( envMapInfo.totalSum != 0.0 && environmentIntensity != 0.0 ) {
-
 								vec3 envColor, envDirection;
 								float envPdf = sampleEquirectProbability( rand2( 11 ), envColor, envDirection );
 								envDirection = invEnvRotation3x3 * envDirection;
 								if ( dot( surf.faceNormal, envDirection ) >= 0.0 && envPdf > 0.0 ) {
-
 									Ray envRay;
 									envRay.origin = hitPoint;
 									envRay.direction = envDirection;
 									vec3 att;
 									if ( attenuateHit( state, envRay, INFINITY, att ) ) shadowFactor = 1.0;
-
 								}
-
 							}
-							// Shadow/Reflection Catcher Logic
-							// Simplified weight calculation to avoid heavy BSDF PDF computation.
-							// We approximate the reflection intensity using Fresnel.
+							state.isShadowRay = false;
 
-							state.isShadowRay = false; // We are tracing a reflection ray now
+							// --- 4. COMPOSITING (transmission masking: reflection hides shadow/background) ---
+							vec3 backColor = sampleBackground( ray.direction, rand2( 2 ) );
+							vec3 shadowedBackground = backColor * ( 1.0 - shadowFactor );
+							vec3 finalReflection = reflectionColor * reflectionWeight * shadowCatcherReflectionIntensity;
+							gl_FragColor.rgb = shadowedBackground * transmissionMask + finalReflection;
 
-							// Calculate approximate weight based on Fresnel
-							// This makes reflections stronger at grazing angles and respects base color for metals.
-							vec3 halfVector = normalize( - ray.direction + catcherScatter.direction );
-							float dotVH = saturate( dot( - ray.direction, halfVector ) );
+							// --- 5. ALPHA (screen blend to avoid black circle) ---
+							float reflectionLuma = dot( finalReflection, vec3( 0.2126, 0.7152, 0.0722 ) );
+							float reflAlpha = saturate( reflectionLuma * 1.5 );
+							float shadowAlpha = shadowFactor * opacity;
+							shadowAlpha *= ( 1.0 - reflAlpha );
+							float combinedAlpha = 1.0 - ( 1.0 - shadowAlpha ) * ( 1.0 - reflAlpha );
+							gl_FragColor.a = max( backgroundAlpha, combinedAlpha );
 
-							// Retrieve F0 from surface parameters
-							// Dialectric F0 is monochromatic (surf.f0), Metal F0 is colored (surf.color)
-							vec3 f0 = mix( vec3( surf.f0 * surf.specularIntensity ), surf.color, surf.metalness );
-							
-							// Compute Fresnel term
-							vec3 fresnel = schlickFresnel( dotVH, f0 );
-
-							// Apply Fresnel weight to reflection
-							// We effectively treat the geometric masking (G) as 1.0 for this approximation,
-							// relying on the scattered direction to provide the "blur" from roughness.
-							gl_FragColor.rgb = reflectionColor * fresnel * ( 1.0 - shadowFactor );
-
-							// 3. Compute alpha based on luminance of the FINAL weighted reflection
-							float refLum = dot( gl_FragColor.rgb, vec3( 0.2126, 0.7152, 0.0722 ) );
-							gl_FragColor.a = ( refLum > 0.01 || shadowFactor > 0.0 ) ? 1.0 : 0.0;
 							break;
 
 						}
@@ -8135,22 +8106,32 @@ bool bvhIntersectFogVolumeHit(
 				} ),
 			];
 
-			// function for listening to for triggered compilation so we can wait for compilation to finish
-			// before starting to render
+			// Debounced compile: wait one frame so multiple define/param changes in one burst cause a single compile.
+			// Reduces GPU exhaustion when toggling options or loading scenes.
+			this._compileScheduled = false;
 			this._compileFunction = () => {
 
-				const promise = this.compileMaterial( this._fsQuad._mesh );
-				promise.then( () => {
+				if ( this._compileScheduled ) return;
+				this._compileScheduled = true;
 
-					if ( this._compilePromise === promise ) {
+				const self = this;
+				requestAnimationFrame( function doCompile() {
 
-						this._compilePromise = null;
+					self._compileScheduled = false;
+					const promise = self.compileMaterial( self._fsQuad._mesh );
+					promise.then( () => {
 
-					}
+						if ( self._compilePromise === promise ) {
+
+							self._compilePromise = null;
+
+						}
+
+					} );
+
+					self._compilePromise = promise;
 
 				} );
-
-				this._compilePromise = promise;
 
 			};
 
@@ -8231,6 +8212,8 @@ bool bvhIntersectFogVolumeHit(
 			this._fsQuad.dispose();
 			this._blendQuad.dispose();
 			this._task = null;
+			this._compilePromise = null;
+			this._compileScheduled = false;
 
 		}
 
@@ -8421,6 +8404,30 @@ bool bvhIntersectFogVolumeHit(
 
 		}
 
+		get saturation() {
+
+			return this.uniforms?.saturation?.value ?? 1;
+
+		}
+
+		set saturation( v ) {
+
+			if ( this.uniforms?.saturation ) this.uniforms.saturation.value = v;
+
+		}
+
+		get contrast() {
+
+			return this.uniforms?.contrast?.value ?? 1;
+
+		}
+
+		set contrast( v ) {
+
+			if ( this.uniforms?.contrast ) this.uniforms.contrast.value = v;
+
+		}
+
 		constructor( params ) {
 
 			super( {
@@ -8428,6 +8435,8 @@ bool bvhIntersectFogVolumeHit(
 
 					map: { value: null },
 					opacity: { value: 1 },
+					saturation: { value: 1 },
+					contrast: { value: 1 },
 
 				},
 
@@ -8444,6 +8453,8 @@ bool bvhIntersectFogVolumeHit(
 				fragmentShader: /* glsl */`
 				uniform sampler2D map;
 				uniform float opacity;
+				uniform float saturation;
+				uniform float contrast;
 				varying vec2 vUv;
 
 				vec4 clampedTexelFatch( sampler2D map, ivec2 px, int lod ) {
@@ -8486,6 +8497,15 @@ bool bvhIntersectFogVolumeHit(
 					);
 
 					gl_FragColor = mix( p1, p2, alpha.y );
+
+					// product saturation (1 = unchanged, 0 = grayscale, >1 = more vivid)
+					float lum = dot( gl_FragColor.rgb, vec3( 0.2126, 0.7152, 0.0722 ) );
+					gl_FragColor.rgb = mix( vec3( lum ), gl_FragColor.rgb, saturation );
+
+					// product contrast (1 = unchanged, >1 = more contrast)
+					gl_FragColor.rgb = ( gl_FragColor.rgb - 0.5 ) * contrast + 0.5;
+					gl_FragColor.rgb = clamp( gl_FragColor.rgb, 0.0, 1.0 );
+
 					gl_FragColor.a *= opacity;
 					#include <premultiplied_alpha_fragment>
 
@@ -8736,6 +8756,30 @@ bool bvhIntersectFogVolumeHit(
 
 		}
 
+		get productSaturation() {
+
+			return this._quad.material.saturation;
+
+		}
+
+		set productSaturation( v ) {
+
+			this._quad.material.saturation = v;
+
+		}
+
+		get productContrast() {
+
+			return this._quad.material.contrast;
+
+		}
+
+		set productContrast( v ) {
+
+			this._quad.material.contrast = v;
+
+		}
+
 		constructor( renderer ) {
 
 			// members
@@ -8760,6 +8804,11 @@ bool bvhIntersectFogVolumeHit(
 			this._previousEnvironment = null;
 			this._previousBackground = null;
 			this._internalBackground = null;
+			this._rasterEnvMap = null; // FloatType copy for scene.environment (raster PBR)
+			this._previousRasterEnvMapSource = null;
+			this._rasterEnvMapScheduled = false;
+			this._pendingMaterialIndexUpdate = null;
+			this._pendingGeometry = null;
 
 			// options
 			this.renderDelay = 100;
@@ -8812,14 +8861,24 @@ bool bvhIntersectFogVolumeHit(
 
 				return generator.generateAsync( options.onProgress ).then( result => {
 
-					return this._updateFromResults( scene, camera, result );
+					this._updateFromResults( scene, camera, result );
+					return this._deferredSceneUpdates().then( () => result );
 
 				} );
 
 			} else {
 
 				const result = generator.generate();
-				return this._updateFromResults( scene, camera, result );
+				this._updateFromResults( scene, camera, result );
+				if ( result.needsMaterialIndexUpdate && result.geometry ) {
+
+					this._pathTracer.material.materialIndexAttribute.updateFrom( result.geometry.attributes.materialIndex );
+
+				}
+				this.updateMaterials();
+				this.updateLights();
+				this.updateEnvironment();
+				return result;
 
 			}
 
@@ -8839,6 +8898,16 @@ bool bvhIntersectFogVolumeHit(
 
 			this.camera = camera;
 			this.updateCamera();
+
+		}
+
+		/**
+		 * Compile the path tracing material (e.g. after setScene) so the first frame doesn't do compile + path trace together.
+		 * Reduces GPU load on initial load. Returns a promise that resolves when compilation is done.
+		 */
+		compileAsync() {
+
+			return this._pathTracer.compileMaterial();
 
 		}
 
@@ -8866,6 +8935,15 @@ bool bvhIntersectFogVolumeHit(
 			const textures = getTextures( materials );
 			material.textures.setTextures( renderer, textures, textureSize.x, textureSize.y );
 			material.materials.updateFrom( materials, textures );
+			// Copy shadow catcher reflection intensity from any floor material that uses it
+			material.shadowCatcherReflectionIntensity = 1.0;
+			for ( let i = 0, l = materials.length; i < l; i ++ ) {
+				const m = materials[ i ];
+				if ( m.shadowReflectionCatcher && m.shadowCatcherReflectionIntensity != null ) {
+					material.shadowCatcherReflectionIntensity = m.shadowCatcherReflectionIntensity;
+					break;
+				}
+			}
 			this.reset();
 
 		}
@@ -8967,6 +9045,75 @@ bool bvhIntersectFogVolumeHit(
 
 			}
 
+			// Use sanitized env map for raster view so Infinity/NaN in raw HDR don't cause black materials.
+			// Raster PBR (WebGLRenderer) often fails with HalfFloatType env maps; use a FloatType copy.
+			const sanitizedMap = material.envMapInfo.map;
+			if ( scene.environment !== null && sanitizedMap ) {
+
+				if ( sanitizedMap.type === three.HalfFloatType ) {
+
+					// Reuse or create FloatType copy for raster view (deferred to avoid blocking first frame with CPU-heavy fromHalfFloat loop)
+					if ( this._previousRasterEnvMapSource !== sanitizedMap && this._rasterEnvMap ) {
+
+						this._rasterEnvMap.dispose();
+						this._rasterEnvMap = null;
+
+					}
+					if ( ! this._rasterEnvMap ) {
+
+						if ( ! this._rasterEnvMapScheduled ) {
+
+							this._rasterEnvMapScheduled = true;
+							const self = this;
+							const source = sanitizedMap;
+							const sc = scene;
+							requestAnimationFrame( function buildRasterEnvMap() {
+
+								self._rasterEnvMapScheduled = false;
+								if ( self._previousRasterEnvMapSource !== source || self._rasterEnvMap ) return;
+
+								const { width, height, data } = source.image;
+								const stride = Math.floor( data.length / ( width * height ) );
+								const floatData = new Float32Array( width * height * 4 );
+								for ( let i = 0; i < width * height; i ++ ) {
+
+									floatData[ 4 * i + 0 ] = three.DataUtils.fromHalfFloat( data[ stride * i + 0 ] );
+									floatData[ 4 * i + 1 ] = three.DataUtils.fromHalfFloat( data[ stride * i + 1 ] );
+									floatData[ 4 * i + 2 ] = three.DataUtils.fromHalfFloat( data[ stride * i + 2 ] );
+									floatData[ 4 * i + 3 ] = stride >= 4 ? three.DataUtils.fromHalfFloat( data[ stride * i + 3 ] ) : 1.0;
+
+								}
+								self._rasterEnvMap = new three.DataTexture( floatData, width, height, three.RGBAFormat, three.FloatType, three.EquirectangularReflectionMapping, three.RepeatWrapping, three.ClampToEdgeWrapping, three.LinearFilter, three.LinearFilter );
+								self._rasterEnvMap.needsUpdate = true;
+								self._previousRasterEnvMapSource = source;
+								sc.environment = self._rasterEnvMap;
+
+							} );
+
+						}
+						// This frame: raster may use HalfFloat (one-frame delay); path tracer uses envMapInfo.map as-is
+
+					} else {
+
+						scene.environment = this._rasterEnvMap;
+
+					}
+
+				} else {
+
+					if ( this._rasterEnvMap ) {
+
+						this._rasterEnvMap.dispose();
+						this._rasterEnvMap = null;
+						this._previousRasterEnvMapSource = null;
+
+					}
+					scene.environment = sanitizedMap;
+
+				}
+
+			}
+
 			this._previousEnvironment = scene.environment;
 			this._previousBackground = scene.background;
 			this.reset();
@@ -9000,9 +9147,16 @@ bool bvhIntersectFogVolumeHit(
 
 			}
 
+			// Defer material index + materials/lights/env to staggered rAFs (reduces GPU exhaustion on initial load)
 			if ( needsMaterialIndexUpdate ) {
 
-				material.materialIndexAttribute.updateFrom( geometry.attributes.materialIndex );
+				this._pendingMaterialIndexUpdate = true;
+				this._pendingGeometry = geometry;
+
+			} else {
+
+				this._pendingMaterialIndexUpdate = false;
+				this._pendingGeometry = null;
 
 			}
 
@@ -9012,11 +9166,39 @@ bool bvhIntersectFogVolumeHit(
 			this.camera = camera;
 
 			this.updateCamera();
-			this.updateMaterials();
-			this.updateEnvironment();
-			this.updateLights();
 
 			return results;
+
+		}
+
+		// Staggered updates across two frames: rAF1 = material index + materials + lights; rAF2 = env. Reduces GPU exhaustion on initial load.
+		_deferredSceneUpdates() {
+
+			const self = this;
+			return new Promise( ( resolve ) => {
+
+				requestAnimationFrame( () => {
+
+					if ( self._pendingMaterialIndexUpdate && self._pendingGeometry ) {
+
+						self._pathTracer.material.materialIndexAttribute.updateFrom( self._pendingGeometry.attributes.materialIndex );
+						self._pendingMaterialIndexUpdate = false;
+						self._pendingGeometry = null;
+
+					}
+					self.updateMaterials();
+					self.updateLights();
+
+					requestAnimationFrame( () => {
+
+						self.updateEnvironment();
+						resolve();
+
+					} );
+
+				} );
+
+			} );
 
 		}
 
@@ -9132,6 +9314,13 @@ bool bvhIntersectFogVolumeHit(
 
 		dispose() {
 
+			if ( this._rasterEnvMap ) {
+
+				this._rasterEnvMap.dispose();
+				this._rasterEnvMap = null;
+				this._previousRasterEnvMapSource = null;
+
+			}
 			this._quad.dispose();
 			this._quad.material.dispose();
 			this._pathTracer.dispose();

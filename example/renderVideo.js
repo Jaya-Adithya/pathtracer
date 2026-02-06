@@ -22,7 +22,7 @@ import { getScaledSettings } from './utils/getScaledSettings.js';
 import { LoaderElement } from './utils/LoaderElement.js';
 
 const ENV_URL = 'https://raw.githubusercontent.com/gkjohnson/3d-demo-data/master/hdri/phalzer_forest_01_1k.hdr';
-const MODEL_URL = new URL('./HP_IN_Blank screen.glb', import.meta.url).href;
+const MODEL_URL = new URL( './HP_IN_Blank screen.glb', import.meta.url ).href;
 const CREDITS = 'Model by DailyArt on Sketchfab';
 
 // CCapture seems to replace the requestAnimationFrame callback which breaks the ability to render and

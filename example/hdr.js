@@ -133,6 +133,7 @@ async function init() {
 		scene.updateMatrixWorld( true );
 		await pathTracer.setSceneAsync( scene, camera, { onProgress: v => loader.setPercentage( v ) } );
 		loader.setCredits( entry.credit || '' );
+
 	}
 
 	await loadAndSetModel( params.model );
@@ -140,7 +141,11 @@ async function init() {
 	loader.setDescription( DESCRIPTION );
 
 	const gui = new GUI();
-	gui.add( params, 'model', Object.keys( MODEL_LIST ).sort() ).onChange( async ( v ) => { await loadAndSetModel( v ); } );
+	gui.add( params, 'model', Object.keys( MODEL_LIST ).sort() ).onChange( async ( v ) => {
+
+		await loadAndSetModel( v );
+
+	} );
 	gui.add( params, 'pause' ).onChange( () => {
 
 		resetHdr();

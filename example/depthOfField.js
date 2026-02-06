@@ -176,7 +176,9 @@ async function init() {
 	// gui
 	const gui = new GUI();
 	gui.add( params, 'model', Object.keys( MODEL_LIST ).sort() ).onChange( async ( v ) => {
+
 		await loadAndSetModel( v );
+
 	} );
 	const ptFolder = gui.addFolder( 'Path Tracer' );
 	ptFolder.add( params, 'tiles', 1, 4, 1 ).onChange( value => {

@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="UTF-8">
+	<title>Path Tracer — All Examples</title>
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' fill='%23111'/></svg>">
+	<style>
+		:root {
+			--bg: #0d0d0f;
+			--surface: #16161a;
+			--border: #2a2a30;
+			--text: #e4e4e7;
+			--muted: #71717a;
+			--accent: #7c9cff;
+			--accent-hover: #9ab0ff;
+		}
+
+		* {
+			box-sizing: border-box;
+		}
+
+		html, body {
+			margin: 0;
+			padding: 0;
+			background: var(--bg);
+			color: var(--text);
+			font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+			line-height: 1.5;
+			min-height: 100vh;
+		}
+
+		.page {
+			max-width: 1100px;
+			margin: 0 auto;
+			padding: 2rem 1.5rem 3rem;
+		}
+
+		header {
+			margin-bottom: 2.5rem;
+			padding-bottom: 1.5rem;
+			border-bottom: 1px solid var(--border);
+		}
+
+		h1 {
+			font-size: 1.75rem;
+			font-weight: 600;
+			margin: 0 0 0.35em;
+			letter-spacing: -0.02em;
+		}
+
+		.subtitle {
+			color: var(--muted);
+			font-size: 0.95rem;
+			margin: 0;
+		}
+
+		.grid {
+			display: grid;
+			grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+			gap: 1rem;
+		}
+
+		.card {
+			display: block;
+			background: var(--surface);
+			border: 1px solid var(--border);
+			border-radius: 10px;
+			padding: 1.1rem 1.25rem;
+			text-decoration: none;
+			color: inherit;
+			transition: border-color 0.2s, background 0.2s, transform 0.15s;
+		}
+
+		.card:hover {
+			border-color: var(--accent);
+			background: #1a1a20;
+			transform: translateY(-2px);
+		}
+
+		.card:focus {
+			outline: none;
+			border-color: var(--accent);
+			box-shadow: 0 0 0 2px rgba(124, 156, 255, 0.25);
+		}
+
+		.card-title {
+			font-weight: 600;
+			font-size: 0.95rem;
+			margin: 0 0 0.25em;
+		}
+
+		.card-file {
+			font-size: 0.8rem;
+			color: var(--muted);
+			font-family: ui-monospace, monospace;
+		}
+
+		.main-link {
+			display: inline-flex;
+			align-items: center;
+			gap: 0.5rem;
+			color: var(--accent);
+			text-decoration: none;
+			font-weight: 500;
+			font-size: 0.9rem;
+			margin-bottom: 1.5rem;
+		}
+
+		.main-link:hover {
+			color: var(--accent-hover);
+		}
+
+		.main-link::before {
+			content: "←";
+		}
+
+		footer {
+			margin-top: 2.5rem;
+			padding-top: 1rem;
+			border-top: 1px solid var(--border);
+			color: var(--muted);
+			font-size: 0.85rem;
+		}
+	</style>
+</head>
+<body>
+	<div class="page">
+		<header>
+			<h1>Path Tracer Examples</h1>
+			<p class="subtitle">All example pages in one place. Click any card to open that demo.</p>
+		</header>
+
+		<div class="grid">
+			<a class="card" href="index.html">
+				<div class="card-title">PBR Path Tracing</div>
+				<div class="card-file">index.html</div>
+			</a>
+			<a class="card" href="basic.html">
+				<div class="card-title">Basic Path Tracing</div>
+				<div class="card-file">basic.html</div>
+			</a>
+			<a class="card" href="primitives.html">
+				<div class="card-title">Basic Primitives</div>
+				<div class="card-file">primitives.html</div>
+			</a>
+			<a class="card" href="depthOfField.html">
+				<div class="card-title">Camera Depth of Field</div>
+				<div class="card-file">depthOfField.html</div>
+			</a>
+			<a class="card" href="areaLight.html">
+				<div class="card-title">Area Light</div>
+				<div class="card-file">areaLight.html</div>
+			</a>
+			<a class="card" href="spotLights.html">
+				<div class="card-title">Spot Lights</div>
+				<div class="card-file">spotLights.html</div>
+			</a>
+			<a class="card" href="hdr.html">
+				<div class="card-title">HDR Path Tracing</div>
+				<div class="card-file">hdr.html</div>
+			</a>
+			<a class="card" href="fog.html">
+				<div class="card-title">Path Tracing Fog</div>
+				<div class="card-file">fog.html</div>
+			</a>
+			<a class="card" href="interior.html">
+				<div class="card-title">Interior Scene</div>
+				<div class="card-file">interior.html</div>
+			</a>
+			<a class="card" href="materialBall.html">
+				<div class="card-title">Material Orb</div>
+				<div class="card-file">materialBall.html</div>
+			</a>
+			<a class="card" href="materialDatabase.html">
+				<div class="card-title">PBR Material Database</div>
+				<div class="card-file">materialDatabase.html</div>
+			</a>
+			<a class="card" href="lego.html">
+				<div class="card-title">LDraw (Lego) Models</div>
+				<div class="card-file">lego.html</div>
+			</a>
+			<a class="card" href="skinnedMesh.html">
+				<div class="card-title">Skinned Mesh</div>
+				<div class="card-file">skinnedMesh.html</div>
+			</a>
+			<a class="card" href="viewer.html">
+				<div class="card-title">Drag & Drop GLTF</div>
+				<div class="card-file">viewer.html</div>
+			</a>
+			<a class="card" href="viewerTest.html">
+				<div class="card-title">Viewer Fidelity Tests</div>
+				<div class="card-file">viewerTest.html</div>
+			</a>
+			<a class="card" href="screenshotList.html">
+				<div class="card-title">Screenshot List</div>
+				<div class="card-file">screenshotList.html</div>
+			</a>
+			<a class="card" href="overlay.html">
+				<div class="card-title">Overlay Path Tracing</div>
+				<div class="card-file">overlay.html</div>
+			</a>
+			<a class="card" href="lkg.html">
+				<div class="card-title">Looking Glass Quilt</div>
+				<div class="card-file">lkg.html</div>
+			</a>
+			<a class="card" href="renderVideo.html">
+				<div class="card-title">Path Traced Video</div>
+				<div class="card-file">renderVideo.html</div>
+			</a>
+			<a class="card" href="aoRender.html">
+				<div class="card-title">Ambient Occlusion</div>
+				<div class="card-file">aoRender.html</div>
+			</a>
+			<a class="card" href="graphing.html">
+				<div class="card-title">Shader Graphing Utility</div>
+				<div class="card-file">graphing.html</div>
+			</a>
+		</div>
+
+		<footer>
+			All examples live in the <code>example/</code> folder. No router — each link opens that demo’s HTML file. Start from this hub to reach any page.
+		</footer>
+	</div>
+</body>
+</html>

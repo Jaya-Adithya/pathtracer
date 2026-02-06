@@ -183,7 +183,7 @@ export class WebGLPathTracer {
 		this.synchronizeRenderSize = true;
 		this.rasterizeScene = true;
 		this.renderToCanvas = true;
-		this.textureSize = new Vector2( 1024, 1024  );  // preview default; final render bumps to 4096
+		this.textureSize = new Vector2( 1024, 1024 ); // preview default; final render bumps to 4096
 		this.rasterizeSceneCallback = ( scene, camera ) => {
 
 			this._renderer.render( scene, camera );
@@ -236,6 +236,7 @@ export class WebGLPathTracer {
 				this._pathTracer.material.materialIndexAttribute.updateFrom( result.geometry.attributes.materialIndex );
 
 			}
+
 			this.updateMaterials();
 			this.updateLights();
 			this.updateEnvironment();
@@ -299,12 +300,17 @@ export class WebGLPathTracer {
 		// Copy shadow catcher reflection intensity from any floor material that uses it
 		material.shadowCatcherReflectionIntensity = 1.0;
 		for ( let i = 0, l = materials.length; i < l; i ++ ) {
+
 			const m = materials[ i ];
 			if ( m.shadowReflectionCatcher && m.shadowCatcherReflectionIntensity != null ) {
+
 				material.shadowCatcherReflectionIntensity = m.shadowCatcherReflectionIntensity;
 				break;
+
 			}
+
 		}
+
 		this.reset();
 
 	}
@@ -420,6 +426,7 @@ export class WebGLPathTracer {
 					this._rasterEnvMap = null;
 
 				}
+
 				if ( ! this._rasterEnvMap ) {
 
 					if ( ! this._rasterEnvMapScheduled ) {
@@ -444,6 +451,7 @@ export class WebGLPathTracer {
 								floatData[ 4 * i + 3 ] = stride >= 4 ? DataUtils.fromHalfFloat( data[ stride * i + 3 ] ) : 1.0;
 
 							}
+
 							self._rasterEnvMap = new DataTexture( floatData, width, height, RGBAFormat, FloatType, EquirectangularReflectionMapping, RepeatWrapping, ClampToEdgeWrapping, LinearFilter, LinearFilter );
 							self._rasterEnvMap.needsUpdate = true;
 							self._previousRasterEnvMapSource = source;
@@ -469,6 +477,7 @@ export class WebGLPathTracer {
 					this._previousRasterEnvMapSource = null;
 
 				}
+
 				scene.environment = sanitizedMap;
 
 			}
@@ -547,6 +556,7 @@ export class WebGLPathTracer {
 					self._pendingGeometry = null;
 
 				}
+
 				self.updateMaterials();
 				self.updateLights();
 
@@ -682,6 +692,7 @@ export class WebGLPathTracer {
 			this._previousRasterEnvMapSource = null;
 
 		}
+
 		this._quad.dispose();
 		this._quad.material.dispose();
 		this._pathTracer.dispose();
