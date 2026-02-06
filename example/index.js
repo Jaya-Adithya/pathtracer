@@ -169,6 +169,9 @@ const params = {
 	// Screen on/off in Animation folder (On | Off screen)
 	animationScreen: 'On',
 
+	// Lock Scene: freeze all controls (camera, GUI, DOF, path tracer settings, model transforms)
+	locked: false,
+
 };
 
 let floorPlane, gui, stats;
@@ -187,6 +190,15 @@ let imageRenderModal = null; // Image render modal instance
 // Pause state: distinguish user-paused vs auto-paused (reached target samples)
 let _autoPausedDueToSamples = false;
 let enableController = null; // GUI controller for params.enable (Path Tracer checkbox)
+
+// Lock Scene: freeze all controls so the user cannot accidentally change anything
+// When locked, GUI controllers remain enabled so the user can tweak values, but
+// changes are NOT applied to the scene until the lock is released (deferred apply).
+let _sceneLocked = false;
+let _lockController = null; // GUI controller for the lock toggle (never disabled itself)
+let _lockPendingApply = false; // onParamsChange was deferred while locked
+let _lockPendingEnvMap = false; // updateEnvMap was deferred while locked
+let _lockPendingModel = null; // model hash change was deferred while locked
 
 // Click-to-focus for DoF
 let sceneBvh = null; // BVH from setSceneAsync for raycasting
@@ -317,6 +329,7 @@ async function init() {
 	controls = new OrbitControls( perspectiveCamera, renderer.domElement );
 	controls.addEventListener( 'change', () => {
 
+		if ( _sceneLocked ) return;
 		pathTracer.updateCamera();
 		// Reset accumulation for new view and resume if we had auto-paused at target samples
 		resetPathTracerAndResumeIfAutoPaused();
@@ -476,6 +489,9 @@ function animate() {
 // Wrapper: reset path tracer and, if we had auto-paused due to samples, resume (unpause)
 function resetPathTracerAndResumeIfAutoPaused() {
 
+	// When locked, don't reset accumulation – preserve the current rendered image
+	if ( _sceneLocked ) return;
+
 	pathTracer.reset();
 	if ( _autoPausedDueToSamples ) {
 
@@ -483,6 +499,91 @@ function resetPathTracerAndResumeIfAutoPaused() {
 		params.pause = false;
 
 	}
+
+}
+
+// ============================================================
+// Lock Scene: freeze/unfreeze all interactive controls
+// ============================================================
+
+function lockScene() {
+
+	_sceneLocked = true;
+	params.locked = true;
+	controls.enabled = false;
+
+	// Reset pending flags – nothing is pending yet at lock time
+	_lockPendingApply = false;
+	_lockPendingEnvMap = false;
+	_lockPendingModel = null;
+
+	// Visual feedback on the lock controller
+	if ( _lockController ) {
+
+		_lockController.name( 'LOCKED' );
+		if ( _lockController.domElement ) {
+
+			_lockController.domElement.classList.add( 'locked-active' );
+
+		}
+
+	}
+
+}
+
+function unlockScene() {
+
+	_sceneLocked = false;
+	params.locked = false;
+
+	// Re-enable OrbitControls (unless background mode is active – that has its own logic)
+	if ( ! isBackgroundModeActive() ) {
+
+		controls.enabled = true;
+
+	}
+
+	// Visual feedback on the lock controller
+	if ( _lockController ) {
+
+		_lockController.name( 'Lock Scene' );
+		if ( _lockController.domElement ) {
+
+			_lockController.domElement.classList.remove( 'locked-active' );
+
+		}
+
+	}
+
+	// ── Apply all deferred changes at once ──
+
+	// Deferred model change (triggers full load via hash)
+	if ( _lockPendingModel !== null ) {
+
+		window.location.hash = _lockPendingModel;
+		_lockPendingModel = null;
+		// Model load will call buildGui + onParamsChange, so skip the rest
+		_lockPendingApply = false;
+		_lockPendingEnvMap = false;
+		return;
+
+	}
+
+	// Deferred environment map load
+	if ( _lockPendingEnvMap ) {
+
+		_lockPendingEnvMap = false;
+		updateEnvMap();
+
+	}
+
+	// Comprehensive sync: tone mapping, tiles, and full params → scene sync
+	renderer.toneMapping = params.acesToneMapping ? ACESFilmicToneMapping : NoToneMapping;
+	pathTracer.tiles.set( params.tiles, params.tiles );
+	onParamsChange();
+	resetPathTracerAndResumeIfAutoPaused();
+
+	_lockPendingApply = false;
 
 }
 
@@ -574,6 +675,14 @@ function syncMaterialEnvMapRotation() {
 
 function onParamsChange() {
 
+	// When locked, defer all scene changes until unlock
+	if ( _sceneLocked ) {
+
+		_lockPendingApply = true;
+		return;
+
+	}
+
 	pathTracer.multipleImportanceSampling = params.multipleImportanceSampling;
 	pathTracer.bounces = params.bounces;
 	pathTracer.filterGlossyFactor = params.filterGlossyFactor;
@@ -658,6 +767,7 @@ function setBackgroundControlsEnabled( enabled ) {
 
 function startBackgroundDrag( e ) {
 
+	if ( _sceneLocked ) return;
 	if ( ! isBackgroundModeActive() || ! contentGroup ) return;
 
 	_bgDragActive = true;
@@ -675,6 +785,7 @@ function startBackgroundDrag( e ) {
 
 function moveBackgroundDrag( e ) {
 
+	if ( _sceneLocked ) return;
 	if ( ! _bgDragActive || ! contentGroup ) return;
 
 	const dx = e.clientX - _bgPrevX;
@@ -735,6 +846,7 @@ async function endBackgroundDrag() {
 
 function onBackgroundWheel( e ) {
 
+	if ( _sceneLocked ) return;
 	if ( ! isBackgroundModeActive() || ! contentGroup ) return;
 
 	e.preventDefault();
@@ -1175,6 +1287,14 @@ function onFocusPointerDown( e ) {
 
 function onFocusPointerUp( e ) {
 
+	if ( _sceneLocked ) return;
+
+	// Only process clicks on the renderer canvas – ignore clicks on GUI, render modal, etc.
+	if ( e.target !== renderer.domElement ) return;
+
+	// Skip when render modal is open to prevent accidental focus changes
+	if ( imageRenderModal && imageRenderModal.isOpen ) return;
+
 	// Only trigger on small mouse movements (click, not drag)
 	const deltaMouse = Math.abs( focusMouse.x - e.clientX ) + Math.abs( focusMouse.y - e.clientY );
 	if ( deltaMouse < 5 && sceneBvh && params.enableDoF ) {
@@ -1219,7 +1339,40 @@ function buildGui() {
 
 	gui = new GUI();
 
+	// Lock Scene toggle – always at the very top of the panel
+	_lockController = gui.add( params, 'locked' ).name( params.locked ? 'LOCKED' : 'Lock Scene' ).onChange( v => {
+
+		if ( v ) {
+
+			lockScene();
+
+		} else {
+
+			unlockScene();
+
+		}
+
+	} );
+
+	if ( _lockController && _lockController.domElement ) {
+
+		_lockController.domElement.classList.add( 'lock-scene-controller' );
+		if ( params.locked ) {
+
+			_lockController.domElement.classList.add( 'locked-active' );
+
+		}
+
+	}
+
 	gui.add( params, 'model', Object.keys( models ).sort() ).onChange( v => {
+
+		if ( _sceneLocked ) {
+
+			_lockPendingModel = v;
+			return;
+
+		}
 
 		window.location.hash = v;
 
@@ -1234,6 +1387,13 @@ function buildGui() {
 		let _animDragging = false;
 		let _animPrevPause = false;
 		animationFolder.add( params, 'animationFrame', 0, maxFrame, 1 ).name( `Frame (0–${maxFrame})` ).onChange( ( frame ) => {
+
+			if ( _sceneLocked ) {
+
+				_lockPendingApply = true;
+				return;
+
+			}
 
 			// Pause path tracing on first drag tick so the GPU isn't fighting us
 			if ( ! _animDragging ) {
@@ -1283,6 +1443,13 @@ function buildGui() {
 			params.animationScreen = ( currentWallpaper === 'off_screen' || currentWallpaper === 'Off screen' ) ? 'Off screen' : 'On';
 			animationFolder.add( params, 'animationScreen', [ 'On', 'Off screen' ] ).name( 'Screen' ).onChange( async ( value ) => {
 
+				if ( _sceneLocked ) {
+
+					_lockPendingApply = true;
+					return;
+
+				}
+
 				if ( value === 'Off screen' ) {
 
 					currentWallpaper = 'off_screen';
@@ -1328,6 +1495,13 @@ function buildGui() {
 		params.productColor = currentColorGroup || colorKeys[ 0 ];
 
 		colorFolder.add( params, 'productColor', colorLabels ).name( 'Color' ).onChange( async ( key ) => {
+
+			if ( _sceneLocked ) {
+
+				_lockPendingApply = true;
+				return;
+
+			}
 
 			// Hide all color meshes
 			Object.values( colorMeshGroups ).forEach( grp => {
@@ -1408,6 +1582,13 @@ function buildGui() {
 	pathTracingFolder.add( params, 'multipleImportanceSampling' ).onChange( onParamsChange );
 	pathTracingFolder.add( params, 'acesToneMapping' ).onChange( v => {
 
+		if ( _sceneLocked ) {
+
+			_lockPendingApply = true;
+			return;
+
+		}
+
 		renderer.toneMapping = v ? ACESFilmicToneMapping : NoToneMapping;
 
 	} );
@@ -1421,11 +1602,25 @@ function buildGui() {
 	} );
 	pathTracingFolder.add( params, 'tiles', 1, 10, 1 ).onChange( v => {
 
+		if ( _sceneLocked ) {
+
+			_lockPendingApply = true;
+			return;
+
+		}
+
 		pathTracer.tiles.set( v, v );
 
 	} );
 	pathTracingFolder.add( params, 'previewSamplesMax', 100, 5000, 100 ).name( 'Preview Sample Cap' );
 	pathTracingFolder.add( params, 'cameraProjection', [ 'Perspective', 'Orthographic' ] ).onChange( v => {
+
+		if ( _sceneLocked ) {
+
+			_lockPendingApply = true;
+			return;
+
+		}
 
 		updateCameraProjection( v );
 
@@ -1481,6 +1676,13 @@ function buildGui() {
 		.name( 'rotation' )
 		.onChange( () => {
 
+			if ( _sceneLocked ) {
+
+				_lockPendingApply = true;
+				return;
+
+			}
+
 			// While dragging: pause path tracer and show HDRI rotation live in raster view
 			if ( ! _envRotationDragging ) {
 
@@ -1503,6 +1705,7 @@ function buildGui() {
 		} )
 		.onFinishChange( () => {
 
+			if ( _sceneLocked ) return;
 			_envRotationDragging = false;
 			onParamsChange();
 			params.enable = _envRotPrevEnable ?? true;
@@ -1512,6 +1715,13 @@ function buildGui() {
 
 	// Use background image as environment lighting (PMREM conversion)
 	environmentFolder.add( params, 'backgroundAsHDRI' ).name( 'BG Image as HDRI' ).onChange( () => {
+
+		if ( _sceneLocked ) {
+
+			_lockPendingApply = true;
+			return;
+
+		}
 
 		applyBackgroundAsHDRI();
 
@@ -1549,6 +1759,13 @@ function buildGui() {
 	}, 'uploadBackgroundImage' ).name( 'Upload Background' );
 
 	backgroundFolder.add( params, 'backgroundImageEnabled' ).name( 'Show Background Image' ).onChange( ( v ) => {
+
+		if ( _sceneLocked ) {
+
+			_lockPendingApply = true;
+			return;
+
+		}
 
 		if ( v && backgroundImageSrc ) {
 
@@ -1635,6 +1852,13 @@ function buildGui() {
 
 	function applyFloorMode( mode ) {
 
+		if ( _sceneLocked ) {
+
+			_lockPendingApply = true;
+			return;
+
+		}
+
 		const isCatcher = mode === 'Shadow Catcher';
 		const isMaterialAlpha = mode === 'Material alpha';
 		params.floorShadowReflectionCatcher = isCatcher;
@@ -1691,6 +1915,13 @@ function buildGui() {
 		// Add wallpaper dropdown (includes off_screen)
 		screenFolder.add( params, 'screenWallpaper', availableWallpapers ).name( 'Wallpaper' ).onChange( async ( value ) => {
 
+			if ( _sceneLocked ) {
+
+				_lockPendingApply = true;
+				return;
+
+			}
+
 			currentWallpaper = value;
 			params.screenWallpaper = value;
 			// Custom wallpaper: defaults 4.5 brightness, 0.9 saturation; predefined: 1 and 1
@@ -1743,6 +1974,13 @@ function buildGui() {
 		// For predefined wallpapers: uses emissiveIntensity (immediate but slightly different)
 		screenFolder.add( params, 'screenBrightness', 0, 10, 0.1 ).onChange( async ( value ) => {
 
+			if ( _sceneLocked ) {
+
+				_lockPendingApply = true;
+				return;
+
+			}
+
 			params.screenBrightness = value; // Update params
 
 			// For custom wallpapers, reprocess the entire image with new brightness
@@ -1782,6 +2020,13 @@ function buildGui() {
 		// Re-processes the custom image with new saturation (0 = grayscale, 1 = normal, 2 = oversaturated)
 		screenFolder.add( params, 'screenSaturation', 0, 2, 0.1 ).onChange( async ( value ) => {
 
+			if ( _sceneLocked ) {
+
+				_lockPendingApply = true;
+				return;
+
+			}
+
 			params.screenSaturation = value; // Update params
 
 			// Only works for custom wallpapers with uploaded image
@@ -1802,9 +2047,25 @@ function buildGui() {
 
 	}
 
+	// If scene was locked before GUI rebuild, maintain lock state (controls stay disabled)
+	if ( params.locked ) {
+
+		_sceneLocked = true;
+		controls.enabled = false;
+
+	}
+
 }
 
 function updateEnvMap() {
+
+	// When locked, defer HDRI load until unlock
+	if ( _sceneLocked ) {
+
+		_lockPendingEnvMap = true;
+		return;
+
+	}
 
 	if ( params.envMap === '__CUSTOM__' ) {
 

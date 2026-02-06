@@ -45,7 +45,25 @@
 				transform: translateY(0) !important;
 				box-shadow: 0 2px 8px rgba(74, 158, 255, 0.5) !important;
 			}
-			#hub-link {
+			/* Lock Scene control – always visible at top of GUI */
+		.lil-gui .lock-scene-controller {
+			border-left: 3px solid #ff8c00 !important;
+			transition: background 0.2s, border-color 0.2s;
+		}
+		.lil-gui .lock-scene-controller:hover {
+			background: rgba(255, 140, 0, 0.1) !important;
+		}
+		.lil-gui .lock-scene-controller.locked-active {
+			background: rgba(255, 60, 60, 0.25) !important;
+			border-left: 3px solid #ff3c3c !important;
+		}
+		.lil-gui .lock-scene-controller.locked-active .name {
+			color: #ff6b6b !important;
+			font-weight: 700 !important;
+			letter-spacing: 0.5px;
+		}
+
+		#hub-link {
 				position: fixed;
 				top: 12px;
 				right: 12px;
