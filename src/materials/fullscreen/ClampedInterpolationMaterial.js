@@ -136,7 +136,7 @@ export class ClampedInterpolationMaterial extends ShaderMaterial {
 					gl_FragColor.rgb = clamp( gl_FragColor.rgb, 0.0, 1.0 );
 
 					gl_FragColor.a *= opacity;
-					#include <premultiplied_alpha_fragment>
+					// Output straight alpha (no premultiply) so canvas and PNG export match viewer expectations.
 
 				}
 			`

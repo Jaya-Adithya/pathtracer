@@ -773,35 +773,161 @@ export class ImageRenderModal {
 	}
 
 	/**
-	 * Capture PNG with alpha preserved. WebGL canvas.toDataURL() often loses alpha;
-	 * reading via readPixels and writing to a 2D canvas ensures transparent background
-	 * is correctly exported (same approach as test-pt / ground plane PNG).
+	 * sRGB encode (linear 0–1 → display 0–1). Matches Three.js linearToOutputTexel for sRGB.
+	 */
+	_sRGBEncode( x ) {
+
+		return x <= 0.0031308 ? x * 12.92 : 1.055 * Math.pow( x, 1 / 2.4 ) - 0.055;
+
+	}
+
+	/**
+	 * ACES Filmic tone mapping (matches Three.js tonemapping_pars_fragment.glsl.js).
+	 * Input/output: linear RGB 0–1. Uses exposure / 0.6 as in Three.js #19621.
+	 */
+	_ACESFilmicToneMapping( r, g, b, exposure ) {
+
+		const scale = ( exposure ?? 1.0 ) / 0.6;
+		let x = r * scale, y = g * scale, z = b * scale;
+		// ACESInputMat (row-major for JS)
+		const ACESInputMat = [
+			[ 0.59719, 0.35458, 0.04823 ],
+			[ 0.07600, 0.90834, 0.01566 ],
+			[ 0.02840, 0.13383, 0.83777 ],
+		];
+		let r1 = ACESInputMat[ 0 ][ 0 ] * x + ACESInputMat[ 0 ][ 1 ] * y + ACESInputMat[ 0 ][ 2 ] * z;
+		let g1 = ACESInputMat[ 1 ][ 0 ] * x + ACESInputMat[ 1 ][ 1 ] * y + ACESInputMat[ 1 ][ 2 ] * z;
+		let b1 = ACESInputMat[ 2 ][ 0 ] * x + ACESInputMat[ 2 ][ 1 ] * y + ACESInputMat[ 2 ][ 2 ] * z;
+		// RRTAndODTFit
+		const fit = ( v ) => {
+
+			const a = v * ( v + 0.0245786 ) - 0.000090537;
+			const b = v * ( 0.983729 * v + 0.4329510 ) + 0.238081;
+			return Math.max( 0, Math.min( 1, a / b ) );
+
+		};
+		r1 = fit( r1 ); g1 = fit( g1 ); b1 = fit( b1 );
+		// ACESOutputMat
+		const ACESOutputMat = [
+			[ 1.60475, - 0.53108, - 0.07367 ],
+			[ - 0.10208, 1.10813, - 0.00605 ],
+			[ - 0.00327, - 0.07276, 1.07602 ],
+		];
+		x = ACESOutputMat[ 0 ][ 0 ] * r1 + ACESOutputMat[ 0 ][ 1 ] * g1 + ACESOutputMat[ 0 ][ 2 ] * b1;
+		y = ACESOutputMat[ 1 ][ 0 ] * r1 + ACESOutputMat[ 1 ][ 1 ] * g1 + ACESOutputMat[ 1 ][ 2 ] * b1;
+		z = ACESOutputMat[ 2 ][ 0 ] * r1 + ACESOutputMat[ 2 ][ 1 ] * g1 + ACESOutputMat[ 2 ][ 2 ] * b1;
+		return {
+			r: Math.max( 0, Math.min( 1, x ) ),
+			g: Math.max( 0, Math.min( 1, y ) ),
+			b: Math.max( 0, Math.min( 1, z ) ),
+		};
+
+	}
+
+	/**
+	 * Apply saturation and contrast (matches ClampedInterpolationMaterial) so export matches canvas.
+	 * r, g, b in 0–1 (sRGB). Modifies in place.
+	 */
+	_applySaturationContrast( r, g, b, saturation, contrast ) {
+
+		const lum = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+		let R = lum + ( r - lum ) * saturation;
+		let G = lum + ( g - lum ) * saturation;
+		let B = lum + ( b - lum ) * saturation;
+		R = ( R - 0.5 ) * contrast + 0.5;
+		G = ( G - 0.5 ) * contrast + 0.5;
+		B = ( B - 0.5 ) * contrast + 0.5;
+		return {
+			r: Math.max( 0, Math.min( 1, R ) ),
+			g: Math.max( 0, Math.min( 1, G ) ),
+			b: Math.max( 0, Math.min( 1, B ) ),
+		};
+
+	}
+
+	/**
+	 * Capture PNG from the path tracer's render target (linear HDR) when possible.
+	 * Applies the same pipeline as the display quad: tone mapping, sRGB, saturation, contrast.
+	 * "Without background" export then matches canvas; "with background" was already correct (composited).
 	 */
 	capturePNGWithAlpha( canvas ) {
 
-		const gl = this.renderer.getContext();
 		const w = canvas.width;
 		const h = canvas.height;
+		const exposure = this.renderer.toneMappingExposure ?? 1.0;
+		const saturation = ( this.pathTracer?.productSaturation != null ) ? this.pathTracer.productSaturation : 1.0;
+		const contrast = ( this.pathTracer?.productContrast != null ) ? this.pathTracer.productContrast : 1.0;
+
+		const target = this.pathTracer?.target;
+		const canReadTarget = target && typeof this.renderer.readRenderTargetPixels === 'function';
+
+		if ( canReadTarget && target.width > 0 && target.height > 0 ) {
+
+			const tw = target.width;
+			const th = target.height;
+			const floatBuf = new Float32Array( tw * th * 4 );
+			this.renderer.readRenderTargetPixels( target, 0, 0, tw, th, floatBuf );
+			// readRenderTargetPixels: origin bottom-left; ImageData is top-left — flip Y
+			const out = new Uint8ClampedArray( tw * th * 4 );
+			for ( let y = 0; y < th; y ++ ) {
+
+				const srcRow = th - 1 - y;
+				for ( let x = 0; x < tw; x ++ ) {
+
+					const i = ( srcRow * tw + x ) * 4;
+					const r = floatBuf[ i ], g = floatBuf[ i + 1 ], b = floatBuf[ i + 2 ], a = floatBuf[ i + 3 ];
+					const tonemapped = this._ACESFilmicToneMapping( r, g, b, exposure );
+					let sr = this._sRGBEncode( tonemapped.r );
+					let sg = this._sRGBEncode( tonemapped.g );
+					let sb = this._sRGBEncode( tonemapped.b );
+					const satContrast = this._applySaturationContrast( sr, sg, sb, saturation, contrast );
+					sr = satContrast.r; sg = satContrast.g; sb = satContrast.b;
+					const dstIdx = ( y * tw + x ) * 4;
+					out[ dstIdx ] = Math.round( Math.max( 0, Math.min( 255, sr * 255 ) ) );
+					out[ dstIdx + 1 ] = Math.round( Math.max( 0, Math.min( 255, sg * 255 ) ) );
+					out[ dstIdx + 2 ] = Math.round( Math.max( 0, Math.min( 255, sb * 255 ) ) );
+					out[ dstIdx + 3 ] = Math.round( Math.max( 0, Math.min( 255, a * 255 ) ) );
+
+				}
+
+			}
+			const tempCanvas = document.createElement( 'canvas' );
+			tempCanvas.width = tw;
+			tempCanvas.height = th;
+			const ctx = tempCanvas.getContext( '2d' );
+			ctx.putImageData( new ImageData( out, tw, th ), 0, 0 );
+			if ( tw === w && th === h ) {
+
+				return tempCanvas.toDataURL( 'image/png', 1.0 );
+
+			}
+			// Scale to requested export size (canvas dimensions)
+			const finalCanvas = document.createElement( 'canvas' );
+			finalCanvas.width = w;
+			finalCanvas.height = h;
+			const finalCtx = finalCanvas.getContext( '2d' );
+			finalCtx.drawImage( tempCanvas, 0, 0, tw, th, 0, 0, w, h );
+			return finalCanvas.toDataURL( 'image/png', 1.0 );
+
+		}
+
+		// Fallback: read from canvas (export may look dimmer than canvas display)
+		console.warn( '📸 [Capture] Using canvas readPixels (path tracer target unavailable or zero size)' );
+		const gl = this.renderer.getContext();
 		const pixels = new Uint8Array( w * h * 4 );
 		gl.readPixels( 0, 0, w, h, gl.RGBA, gl.UNSIGNED_BYTE, pixels );
-		// readPixels is bottom-to-top; ImageData is top-to-bottom — flip rows
 		const flipped = new Uint8ClampedArray( w * h * 4 );
 		for ( let y = 0; y < h; y ++ ) {
 
 			const srcRow = h - 1 - y;
-			for ( let i = 0; i < w * 4; i ++ ) {
-
-				flipped[ y * w * 4 + i ] = pixels[ srcRow * w * 4 + i ];
-
-			}
+			for ( let i = 0; i < w * 4; i ++ ) flipped[ y * w * 4 + i ] = pixels[ srcRow * w * 4 + i ];
 
 		}
 		const tempCanvas = document.createElement( 'canvas' );
 		tempCanvas.width = w;
 		tempCanvas.height = h;
 		const ctx = tempCanvas.getContext( '2d' );
-		const imageData = new ImageData( flipped, w, h );
-		ctx.putImageData( imageData, 0, 0 );
+		ctx.putImageData( new ImageData( flipped, w, h ), 0, 0 );
 		return tempCanvas.toDataURL( 'image/png', 1.0 );
 
 	}
