@@ -95,12 +95,14 @@ const envMaps = {
 
 };
 
+const scaledSettings = getScaledSettings();
+
 const params = {
 
 	multipleImportanceSampling: true,
 	acesToneMapping: true,
-	...getScaledSettings(),
-	renderScale: 2, // default full-quality preview; interactivity still reduces scale during orbit
+	...scaledSettings,
+	renderScale: scaledSettings.gpuTier === 'low' ? scaledSettings.renderScale : 2, // low-end uses adaptive scale; others use full-quality preview
 
 	model: '',
 
@@ -128,14 +130,14 @@ const params = {
 	anamorphicRatio: 1,
 
 	backgroundType: 'Gradient',
-	bgGradientTop: '#111111',
-	bgGradientBottom: '#000000',
+	bgGradientTop: '#333333',
+	bgGradientBottom: '#111111',
 	backgroundBlur: 0.0,
 	transparentBackground: false,
 	checkerboardTransparency: true,
 
 	enable: true,
-	bounces: 5,
+	bounces: scaledSettings.bounces || 5,
 	filterGlossyFactor: 0.1,
 	pause: false,
 	previewSamplesMax: 100, // cap preview accumulation – final render uses its own target
@@ -242,6 +244,22 @@ async function waitFrame() {
 
 }
 
+function isWebGLAvailable() {
+
+	try {
+
+		const canvas = document.createElement( 'canvas' );
+		const gl = canvas.getContext( 'webgl2' ) || canvas.getContext( 'webgl' );
+		return !! gl;
+
+	} catch ( _e ) {
+
+		return false;
+
+	}
+
+}
+
 async function init() {
 
 	// Wait for the models list to be available since vite doesn't guarantee execution order
@@ -252,8 +270,35 @@ async function init() {
 	loader = new LoaderElement();
 	loader.attach( document.body );
 
+	if ( ! isWebGLAvailable() ) {
+
+		loader.setPercentage( 0 );
+		loader.setCredits( 'WebGL is not available. Enable hardware acceleration or try another browser.' );
+		console.error( 'WebGL not available. Path tracer requires a valid WebGL context.' );
+		return;
+
+	}
+
+	// renderer — wrap in try/catch; context creation can fail (e.g. sandboxed GPU, disabled)
+	try {
+
+		renderer = new WebGLRenderer( { antialias: true, alpha: true, premultipliedAlpha: false, preserveDrawingBuffer: true } );
+		if ( ! renderer.getContext() ) {
+
+			throw new Error( 'WebGL context could not be created' );
+
+		}
+
+	} catch ( err ) {
+
+		loader.setPercentage( 0 );
+		loader.setCredits( 'Could not create WebGL context. Try disabling sandbox or enabling GPU acceleration.' );
+		console.error( 'WebGLRenderer failed:', err );
+		return;
+
+	}
+
 	// renderer — alpha + premultipliedAlpha:false so CSS background shows through
-	renderer = new WebGLRenderer( { antialias: true, alpha: true, premultipliedAlpha: false, preserveDrawingBuffer: true } );
 	renderer.toneMapping = ACESFilmicToneMapping;
 	renderer.toneMappingExposure = 1.0;
 	renderer.outputColorSpace = SRGBColorSpace;
@@ -413,7 +458,7 @@ async function init() {
 
 	// Solid ground: path tracer uses hit-flag (SKIP_SURFACE/HIT_SURFACE) + alpha-based transparency (alpha test or stochastic alpha) + transmission.
 	// getSurfaceRecord() returns SKIP when transparent/alpha test; transmission and attenuateHit() handle glass-like floor. No luminance for PNG transparency.
-	const floorTex = generateRadialFloorTexture( 2048 );
+	const floorTex = generateRadialFloorTexture( scaledSettings.floorTextureSize || 2048 );
 	floorPlane = new Mesh(
 		new PlaneGeometry(),
 		new MeshPhysicalMaterial( {
@@ -619,6 +664,10 @@ function syncSceneEnvironmentFromParams() {
 
 		scene.background = null;
 		renderer.setClearAlpha( 0 );
+
+	} else {
+
+		renderer.setClearAlpha( 1 );
 
 	}
 

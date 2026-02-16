@@ -11,6 +11,7 @@ import {
 	MeshStandardMaterial,
 } from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader.js';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { WebGLPathTracer } from '../src/index.js';
 import { HDRLoader } from 'three/examples/jsm/loaders/HDRLoader.js';
@@ -22,7 +23,7 @@ import { getScaledSettings } from './utils/getScaledSettings.js';
 import { LoaderElement } from './utils/LoaderElement.js';
 
 const ENV_URL = 'https://raw.githubusercontent.com/gkjohnson/3d-demo-data/master/hdri/phalzer_forest_01_1k.hdr';
-const MODEL_URL = new URL( './HP_IN_Blank screen.glb', import.meta.url ).href;
+const MODEL_URL = new URL( './assets/HP_IN_Blank screen.glb', import.meta.url ).href;
 const CREDITS = 'Model by DailyArt on Sketchfab';
 
 // CCapture seems to replace the requestAnimationFrame callback which breaks the ability to render and
@@ -92,13 +93,55 @@ const params = {
 
 init();
 
+function isWebGLAvailable() {
+
+	try {
+
+		const canvas = document.createElement( 'canvas' );
+		const gl = canvas.getContext( 'webgl2' ) || canvas.getContext( 'webgl' );
+		return !! gl;
+
+	} catch ( _e ) {
+
+		return false;
+
+	}
+
+}
+
 async function init() {
 
 	loader = new LoaderElement();
 	loader.attach( document.body );
 
-	// renderer
-	renderer = new WebGLRenderer( { antialias: true, preserveDrawingBuffer: true } );
+	if ( ! isWebGLAvailable() ) {
+
+		loader.setPercentage( 0 );
+		loader.setCredits( 'WebGL is not available. Enable hardware acceleration or try another browser.' );
+		console.error( 'WebGL not available. Path tracer requires a valid WebGL context.' );
+		return;
+
+	}
+
+	// renderer — wrap in try/catch; context creation can fail (e.g. sandboxed GPU, disabled)
+	try {
+
+		renderer = new WebGLRenderer( { antialias: true, preserveDrawingBuffer: true } );
+		if ( ! renderer.getContext() ) {
+
+			throw new Error( 'WebGL context could not be created' );
+
+		}
+
+	} catch ( err ) {
+
+		loader.setPercentage( 0 );
+		loader.setCredits( 'Could not create WebGL context. Try disabling sandbox or enabling GPU acceleration.' );
+		console.error( 'WebGLRenderer failed:', err );
+		return;
+
+	}
+
 	renderer.toneMapping = ACESFilmicToneMapping;
 	document.body.appendChild( renderer.domElement );
 
@@ -131,7 +174,10 @@ async function init() {
 	// load assets
 	const [ envTexture, gltf ] = await Promise.all( [
 		new HDRLoader().loadAsync( ENV_URL ),
-		new GLTFLoader().setMeshoptDecoder( MeshoptDecoder ).loadAsync( MODEL_URL ),
+		new GLTFLoader()
+			.setDRACOLoader( new DRACOLoader().setDecoderPath( 'https://www.gstatic.com/draco/versioned/decoders/1.5.7/' ) )
+			.setMeshoptDecoder( MeshoptDecoder )
+			.loadAsync( MODEL_URL ),
 	] );
 
 	envTexture.mapping = EquirectangularReflectionMapping;
