@@ -188,25 +188,6 @@ export class PhysicalCamera extends PerspectiveCamera {
 
 }
 
-export class EquirectCamera extends Camera {
-
-	readonly isEquirectCamera: true;
-
-}
-
-export class PhysicalSpotLight extends SpotLight {
-
-	radius: number;
-	iesTexture: DataTexture | null;
-
-}
-
-export class ShapedAreaLight extends RectAreaLight {
-
-	isCircular: boolean;
-
-}
-
 // textures
 
 export class ProceduralEquirectTexture extends DataTexture {
@@ -229,47 +210,11 @@ export class GradientEquirectTexture extends ProceduralEquirectTexture {
 
 }
 
-// utils
-
-export class BlurredEnvMapGenerator {
-
-	constructor( renderer: WebGLRenderer );
-
-	renderer: WebGLRenderer;
-	pmremGenerator: PMREMGenerator;
-	copyQuad: FullScreenQuad;
-	renderTarget: WebGLRenderTarget;
-
-	generate( texture: Texture, blur: number ): DataTexture;
-	dispose(): void;
-
-}
-
 // materials
 
 declare class MaterialBase extends ShaderMaterial {
 
 	setDefine( name: string, value: any ): boolean;
-
-}
-
-export interface DenoiseMaterialParameters extends ShaderMaterialParameters {
-
-	sigma?: number;
-	kSigma?: number;
-	threshold?: number;
-	map?: Texture;
-
-}
-
-export class DenoiseMaterial extends MaterialBase {
-
-	constructor( parameters?: DenoiseMaterialParameters );
-
-	sigma: number;
-	kSigma: number;
-	threshold: number;
-	map: Texture | null;
 
 }
 

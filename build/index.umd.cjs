@@ -7709,11 +7709,40 @@ bool bvhIntersectFogVolumeHit(
 
 						}
 
-						// shadow/reflection catcher: Production Grade V2
-						// Solves wavering ripples (stable Fresnel), double ghosting (transmission mask), black circle (screen-blend alpha)
+						// shadow/reflection catcher: Production Grade V3
+						// V2 fixes: stable Fresnel, transmission mask, screen-blend alpha
+						// V3 fixes: per-texel radial alpha, dual-mode compositing (opaque/transparent background)
 						if ( material.shadowReflectionCatcher && state.firstRay ) {
 
 							vec3 hitPoint = stepRayOrigin( ray.origin, ray.direction, surf.faceNormal, surfaceHit.dist );
+
+							// --- 0. PER-TEXEL ALPHA for radial floor fade ---
+							vec2 catcherUV = textureSampleBarycoord(
+								attributesArray, ATTR_UV, surfaceHit.barycoord, surfaceHit.faceIndices.xyz
+							).xy;
+							float texelAlpha = material.opacity;
+							if ( material.map != - 1 ) {
+
+								vec3 uvPrime = material.mapTransform * vec3( catcherUV, 1 );
+								texelAlpha *= texture2D( textures, vec3( uvPrime.xy, material.map ) ).a;
+
+							}
+							if ( material.alphaMap != - 1 ) {
+
+								vec3 uvPrime = material.alphaMapTransform * vec3( catcherUV, 1 );
+								texelAlpha *= texture2D( textures, vec3( uvPrime.xy, material.alphaMap ) ).x;
+
+							}
+
+							// Stochastic transparency at radial edges (matches getSurfaceRecord logic)
+							if ( material.transparent && texelAlpha < rand( 3 ) ) {
+
+								ray.origin = stepRayOrigin( ray.origin, ray.direction, - surfaceHit.faceNormal, surfaceHit.dist );
+								i -= sign( state.transmissiveTraversals );
+								state.transmissiveTraversals -= sign( state.transmissiveTraversals );
+								continue;
+
+							}
 
 							// --- 1. STABLE FRESNEL MASK (prevents "waver" ripples) ---
 							// Use perfect reflection vector so the mask does not jitter with roughness
@@ -7746,6 +7775,7 @@ bool bvhIntersectFogVolumeHit(
 							vec3 reflectionColor = vec3( 0.0 );
 
 							if ( reflHitType == SURFACE_HIT ) {
+
 								uint reflMatIndex = uTexelFetch1D( materialIndexAttribute, reflHit.faceIndices.x ).r;
 								Material reflMat = readMaterialInfo( materials, reflMatIndex );
 								SurfaceRecord reflSurf;
@@ -7753,6 +7783,15 @@ bool bvhIntersectFogVolumeHit(
 									vec3 reflHitPoint = stepRayOrigin( reflRay.origin, reflRay.direction, reflSurf.faceNormal, reflHit.dist );
 									reflectionColor = reflSurf.emission + directLightContribution( - reflDir, reflSurf, state, reflHitPoint );
 								}
+
+							} else {
+
+								// Reflection ray missed all geometry — sample the environment as reflection source.
+								// Without this, reflections go black when the emissive background plane is hidden.
+								reflectionColor = environmentIntensity * applyEnvSaturation(
+									sampleEquirectColor( envMapInfo.map, envRotation3x3 * reflDir )
+								);
+
 							}
 
 							// --- 3. SHADOW TRACING ---
@@ -7781,19 +7820,32 @@ bool bvhIntersectFogVolumeHit(
 							}
 							state.isShadowRay = false;
 
-							// --- 4. COMPOSITING (transmission masking: reflection hides shadow/background) ---
+							// --- 4. COMPOSITING (dual-mode: opaque vs transparent background) ---
 							vec3 backColor = sampleBackground( ray.direction, rand2( 2 ) );
-							vec3 shadowedBackground = backColor * ( 1.0 - shadowFactor );
-							vec3 finalReflection = reflectionColor * reflectionWeight * shadowCatcherReflectionIntensity;
-							gl_FragColor.rgb = shadowedBackground * transmissionMask + finalReflection;
+							vec3 finalReflection = reflectionColor * reflectionWeight * shadowCatcherReflectionIntensity * texelAlpha;
 
-							// --- 5. ALPHA (screen blend to avoid black circle) ---
+							// --- 5. ALPHA (screen blend to avoid black circle, using per-texel alpha) ---
 							float reflectionLuma = dot( finalReflection, vec3( 0.2126, 0.7152, 0.0722 ) );
 							float reflAlpha = saturate( reflectionLuma * 1.5 );
-							float shadowAlpha = shadowFactor * opacity;
+							float shadowAlpha = shadowFactor * texelAlpha;
 							shadowAlpha *= ( 1.0 - reflAlpha );
 							float combinedAlpha = 1.0 - ( 1.0 - shadowAlpha ) * ( 1.0 - reflAlpha );
-							gl_FragColor.a = max( backgroundAlpha, combinedAlpha );
+
+							if ( backgroundAlpha > 0.0 ) {
+
+								// Opaque background: composite shadow+reflection over sampled background
+								vec3 shadowedBackground = backColor * ( 1.0 - shadowFactor );
+								gl_FragColor.rgb = shadowedBackground * transmissionMask + finalReflection;
+								gl_FragColor.a = max( backgroundAlpha, combinedAlpha );
+
+							} else {
+
+								// Transparent background: shadow via alpha only, reflection is additive RGB
+								// Prevents dark HDRI from bleeding into the ground plane
+								gl_FragColor.rgb = finalReflection;
+								gl_FragColor.a = combinedAlpha;
+
+							}
 
 							break;
 
@@ -9423,326 +9475,6 @@ bool bvhIntersectFogVolumeHit(
 
 	}
 
-	class EquirectCamera extends three.Camera {
-
-		constructor() {
-
-			super();
-
-			this.isEquirectCamera = true;
-
-		}
-
-	}
-
-	class PhysicalSpotLight extends three.SpotLight {
-
-		constructor( ...args ) {
-
-			super( ...args );
-
-			this.iesMap = null;
-			this.radius = 0;
-
-		}
-
-		copy( source, recursive ) {
-
-			super.copy( source, recursive );
-
-			this.iesMap = source.iesMap;
-			this.radius = source.radius;
-
-			return this;
-
-		}
-
-	}
-
-	class ShapedAreaLight extends three.RectAreaLight {
-
-		constructor( ...args ) {
-
-			super( ...args );
-			this.isCircular = false;
-
-		}
-
-		copy( source, recursive ) {
-
-			super.copy( source, recursive );
-
-			this.isCircular = source.isCircular;
-
-			return this;
-
-		}
-
-	}
-
-	class PMREMCopyMaterial extends MaterialBase {
-
-		constructor() {
-
-			super( {
-
-				uniforms: {
-
-					envMap: { value: null },
-					blur: { value: 0 },
-
-				},
-
-				vertexShader: /* glsl */`
-
-				varying vec2 vUv;
-				void main() {
-					vUv = uv;
-					gl_Position = projectionMatrix * modelViewMatrix * vec4( position, 1.0 );
-				}
-
-			`,
-
-				fragmentShader: /* glsl */`
-
-				#include <common>
-				#include <cube_uv_reflection_fragment>
-
-				${ util_functions }
-
-				uniform sampler2D envMap;
-				uniform float blur;
-				varying vec2 vUv;
-				void main() {
-
-					vec3 rayDirection = equirectUvToDirection( vUv );
-					gl_FragColor = textureCubeUV( envMap, rayDirection, blur );
-
-				}
-
-			`,
-
-			} );
-
-		}
-
-	}
-
-	class BlurredEnvMapGenerator {
-
-		constructor( renderer ) {
-
-			this.renderer = renderer;
-			this.pmremGenerator = new three.PMREMGenerator( renderer );
-			this.copyQuad = new Pass_js.FullScreenQuad( new PMREMCopyMaterial() );
-			this.renderTarget = new three.WebGLRenderTarget( 1, 1, { type: three.FloatType, format: three.RGBAFormat } );
-
-		}
-
-		dispose() {
-
-			this.pmremGenerator.dispose();
-			this.copyQuad.dispose();
-			this.renderTarget.dispose();
-
-		}
-
-		generate( texture, blur ) {
-
-			const { pmremGenerator, renderTarget, copyQuad, renderer } = this;
-
-			// get the pmrem target
-			const pmremTarget = pmremGenerator.fromEquirectangular( texture );
-
-			// set up the material
-			const { width, height } = texture.image;
-			renderTarget.setSize( width, height );
-			copyQuad.material.envMap = pmremTarget.texture;
-			copyQuad.material.blur = blur;
-
-			// render
-			const prevRenderTarget = renderer.getRenderTarget();
-			const prevClear = renderer.autoClear;
-
-			renderer.setRenderTarget( renderTarget );
-			renderer.autoClear = true;
-			copyQuad.render( renderer );
-
-			renderer.setRenderTarget( prevRenderTarget );
-			renderer.autoClear = prevClear;
-
-			// read the data back
-			const buffer = new Uint16Array( width * height * 4 );
-			const readBuffer = new Float32Array( width * height * 4 );
-			renderer.readRenderTargetPixels( renderTarget, 0, 0, width, height, readBuffer );
-
-			for ( let i = 0, l = readBuffer.length; i < l; i ++ ) {
-
-				buffer[ i ] = three.DataUtils.toHalfFloat( readBuffer[ i ] );
-
-			}
-
-			const result = new three.DataTexture( buffer, width, height, three.RGBAFormat, three.HalfFloatType );
-			result.minFilter = texture.minFilter;
-			result.magFilter = texture.magFilter;
-			result.wrapS = texture.wrapS;
-			result.wrapT = texture.wrapT;
-			result.mapping = three.EquirectangularReflectionMapping;
-			result.needsUpdate = true;
-
-			// dispose of the now unneeded target
-			pmremTarget.dispose();
-
-			return result;
-
-		}
-
-	}
-
-	class DenoiseMaterial extends MaterialBase {
-
-		constructor( parameters ) {
-
-			super( {
-
-				blending: three.NoBlending,
-
-				transparent: false,
-
-				depthWrite: false,
-
-				depthTest: false,
-
-				defines: {
-
-					USE_SLIDER: 0,
-
-				},
-
-				uniforms: {
-
-					sigma: { value: 5.0 },
-					threshold: { value: 0.03 },
-					kSigma: { value: 1.0 },
-
-					map: { value: null },
-					opacity: { value: 1 },
-
-				},
-
-				vertexShader: /* glsl */`
-
-				varying vec2 vUv;
-
-				void main() {
-
-					vUv = uv;
-					gl_Position = projectionMatrix * modelViewMatrix * vec4( position, 1.0 );
-
-				}
-
-			`,
-
-				fragmentShader: /* glsl */`
-
-				//~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-				//  Copyright (c) 2018-2019 Michele Morrone
-				//  All rights reserved.
-				//
-				//  https://michelemorrone.eu - https://BrutPitt.com
-				//
-				//  me@michelemorrone.eu - brutpitt@gmail.com
-				//  twitter: @BrutPitt - github: BrutPitt
-				//
-				//  https://github.com/BrutPitt/glslSmartDeNoise/
-				//
-				//  This software is distributed under the terms of the BSD 2-Clause license
-				//~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-				uniform sampler2D map;
-
-				uniform float sigma;
-				uniform float threshold;
-				uniform float kSigma;
-				uniform float opacity;
-
-				varying vec2 vUv;
-
-				#define INV_SQRT_OF_2PI 0.39894228040143267793994605993439
-				#define INV_PI 0.31830988618379067153776752674503
-
-				// Parameters:
-				//	 sampler2D tex	 - sampler image / texture
-				//	 vec2 uv		   - actual fragment coord
-				//	 float sigma  >  0 - sigma Standard Deviation
-				//	 float kSigma >= 0 - sigma coefficient
-				//		 kSigma * sigma  -->  radius of the circular kernel
-				//	 float threshold   - edge sharpening threshold
-				vec4 smartDeNoise( sampler2D tex, vec2 uv, float sigma, float kSigma, float threshold ) {
-
-					float radius = round( kSigma * sigma );
-					float radQ = radius * radius;
-
-					float invSigmaQx2 = 0.5 / ( sigma * sigma );
-					float invSigmaQx2PI = INV_PI * invSigmaQx2;
-
-					float invThresholdSqx2 = 0.5 / ( threshold * threshold );
-					float invThresholdSqrt2PI = INV_SQRT_OF_2PI / threshold;
-
-					vec4 centrPx = texture2D( tex, uv );
-					centrPx.rgb *= centrPx.a;
-
-					float zBuff = 0.0;
-					vec4 aBuff = vec4( 0.0 );
-					vec2 size = vec2( textureSize( tex, 0 ) );
-
-					vec2 d;
-					for ( d.x = - radius; d.x <= radius; d.x ++ ) {
-
-						float pt = sqrt( radQ - d.x * d.x );
-
-						for ( d.y = - pt; d.y <= pt; d.y ++ ) {
-
-							float blurFactor = exp( - dot( d, d ) * invSigmaQx2 ) * invSigmaQx2PI;
-
-							vec4 walkPx = texture2D( tex, uv + d / size );
-							walkPx.rgb *= walkPx.a;
-
-							vec4 dC = walkPx - centrPx;
-							float deltaFactor = exp( - dot( dC.rgba, dC.rgba ) * invThresholdSqx2 ) * invThresholdSqrt2PI * blurFactor;
-
-							zBuff += deltaFactor;
-							aBuff += deltaFactor * walkPx;
-
-						}
-
-					}
-
-					return aBuff / zBuff;
-
-				}
-
-				void main() {
-
-					gl_FragColor = smartDeNoise( map, vec2( vUv.x, vUv.y ), sigma, kSigma, threshold );
-					#include <tonemapping_fragment>
-					#include <colorspace_fragment>
-					#include <premultiplied_alpha_fragment>
-
-					gl_FragColor.a *= opacity;
-
-				}
-
-			`
-
-			} );
-
-			this.setValues( parameters );
-
-		}
-
-	}
-
 	class FogVolumeMaterial extends three.MeshStandardMaterial {
 
 		constructor( params ) {
@@ -9767,10 +9499,7 @@ bool bvhIntersectFogVolumeHit(
 
 	// core
 
-	exports.BlurredEnvMapGenerator = BlurredEnvMapGenerator;
-	exports.DenoiseMaterial = DenoiseMaterial;
 	exports.DynamicPathTracingSceneGenerator = DynamicPathTracingSceneGenerator;
-	exports.EquirectCamera = EquirectCamera;
 	exports.FogVolumeMaterial = FogVolumeMaterial;
 	exports.GradientEquirectTexture = GradientEquirectTexture;
 	exports.PathTracingRenderer = PathTracingRenderer;
@@ -9778,9 +9507,7 @@ bool bvhIntersectFogVolumeHit(
 	exports.PathTracingSceneWorker = PathTracingSceneWorker;
 	exports.PhysicalCamera = PhysicalCamera;
 	exports.PhysicalPathTracingMaterial = PhysicalPathTracingMaterial;
-	exports.PhysicalSpotLight = PhysicalSpotLight;
 	exports.ProceduralEquirectTexture = ProceduralEquirectTexture;
-	exports.ShapedAreaLight = ShapedAreaLight;
 	exports.WebGLPathTracer = WebGLPathTracer;
 
 	Object.defineProperty(exports, '__esModule', { value: true });
