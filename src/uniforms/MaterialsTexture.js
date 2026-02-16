@@ -4,6 +4,8 @@ import { bufferToHash } from '../utils/bufferToHash.js';
 
 export const MATERIAL_PIXELS = 47;
 const MATERIAL_STRIDE = MATERIAL_PIXELS * 4;
+// Cap atlas dimension to avoid unbounded GPU memory and upload cost for huge material counts
+const MAX_MATERIAL_ATLAS_DIMENSION = 4096;
 
 class MaterialFeatures {
 
@@ -118,7 +120,10 @@ export class MaterialsTexture extends DataTexture {
 
 		let index = 0;
 		const pixelCount = materials.length * MATERIAL_PIXELS;
-		const dimension = Math.ceil( Math.sqrt( pixelCount ) ) || 1;
+		let dimension = Math.ceil( Math.sqrt( pixelCount ) ) || 1;
+		dimension = Math.min( dimension, MAX_MATERIAL_ATLAS_DIMENSION );
+		const maxPixels = dimension * dimension;
+		const maxMaterialsToWrite = Math.floor( maxPixels / MATERIAL_PIXELS );
 		const { image, features } = this;
 
 		// index the list of textures based on shareable source
@@ -133,20 +138,26 @@ export class MaterialsTexture extends DataTexture {
 
 			this.dispose();
 
-			image.data = new Float32Array( dimension * dimension * 4 );
+			image.data = new Float32Array( maxPixels * 4 );
 			image.width = dimension;
 			image.height = dimension;
 
 		}
 
 		const floatArray = image.data;
+		const materialsToProcess = Math.min( materials.length, maxMaterialsToWrite );
+		if ( materialsToProcess < materials.length ) {
+
+			console.warn( `MaterialsTexture: material count ${ materials.length } exceeds atlas capacity (${ maxMaterialsToWrite }); only first ${ materialsToProcess } materials will be used.` );
+
+		}
 
 		// on some devices (Google Pixel 6) the "floatBitsToInt" function does not work correctly so we
 		// can't encode texture ids that way.
 		// const intArray = new Int32Array( floatArray.buffer );
 
 		features.reset();
-		for ( let i = 0, l = materials.length; i < l; i ++ ) {
+		for ( let i = 0, l = materialsToProcess; i < l; i ++ ) {
 
 			const m = materials[ i ];
 

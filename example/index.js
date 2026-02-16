@@ -151,6 +151,8 @@ const params = {
 	floorMetalness: 0.2,
 	floorTransmission: 0.0,
 	floorIOR: 1.5,
+	floorAttenuationColor: '#ffffff',
+	floorAttenuationDistance: 10.0,
 	floorShadowReflectionCatcher: true, // derived from floorMode (true only for Shadow Catcher)
 
 	screenBrightness: 1, // Predefined wallpapers: 1; custom wallpaper defaults to 4.5 when selected
@@ -469,10 +471,12 @@ async function init() {
 			metalness: 0.0,
 			transmission: 0.0,
 			ior: 1.5,
+			thickness: 1.0,
 			side: DoubleSide,
 			shadowReflectionCatcher: params.floorShadowReflectionCatcher,
 		} )
 	);
+	floorPlane.userData.radialFloorTexture = floorTex;
 	floorPlane.scale.setScalar( 5 );
 	floorPlane.rotation.x = - Math.PI / 2;
 	contentGroup.add( floorPlane );
@@ -738,6 +742,8 @@ function onParamsChange() {
 	floorPlane.material.metalness = params.floorMetalness;
 	floorPlane.material.transmission = params.floorTransmission;
 	floorPlane.material.ior = params.floorIOR;
+	floorPlane.material.attenuationColor.set( params.floorAttenuationColor );
+	floorPlane.material.attenuationDistance = params.floorAttenuationDistance;
 	floorPlane.material.shadowReflectionCatcher = params.floorShadowReflectionCatcher;
 	floorPlane.material.shadowCatcherReflectionIntensity = params.floorReflectionIntensity;
 	if ( params.floorMode === 'Shadow Catcher' ) {
@@ -1815,7 +1821,9 @@ function buildGui() {
 	solidControls.push( floorFolder.addColor( params, 'floorColor' ).onChange( onParamsChange ) );
 	solidControls.push( floorFolder.add( params, 'floorOpacity', 0, 1 ).onChange( onParamsChange ).name( 'Opacity' ) );
 	solidControls.push( floorFolder.add( params, 'floorTransmission', 0, 1 ).name( 'Transmission' ).onChange( onParamsChange ) );
-	solidControls.push( floorFolder.add( params, 'floorIOR', 1.0, 2.0, 0.01 ).name( 'IOR' ).onChange( onParamsChange ) );
+	solidControls.push( floorFolder.add( params, 'floorIOR', 1.0, 2.333, 0.01 ).name( 'IOR' ).onChange( onParamsChange ) );
+	solidControls.push( floorFolder.addColor( params, 'floorAttenuationColor' ).name( 'Attenuation Color' ).onChange( onParamsChange ) );
+	solidControls.push( floorFolder.add( params, 'floorAttenuationDistance', 0.01, 10, 0.01 ).name( 'Attenuation Dist' ).onChange( onParamsChange ) );
 
 	// Shadow Catcher–only: shadow opacity (intensity of shadow on ground)
 	const shadowOpacityCtrl = floorFolder.add( params, 'floorShadowOpacity', 0, 2 ).onChange( onParamsChange ).name( 'Shadow opacity' );
@@ -1841,6 +1849,7 @@ function buildGui() {
 		} );
 		shadowOpacityCtrl.domElement.style.display = '';
 
+		// Match test-pt: only opacity and transparent per mode; never touch map after creation.
 		if ( isCatcher ) {
 
 			floorPlane.material.opacity = Math.min( 1, params.floorShadowOpacity );

@@ -435,29 +435,55 @@ export class WebGLPathTracer {
 						const self = this;
 						const source = sanitizedMap;
 						const sc = scene;
-						requestAnimationFrame( function buildRasterEnvMap() {
+						const { width, height, data } = source.image;
+						const stride = Math.floor( data.length / ( width * height ) );
+						const floatData = new Float32Array( width * height * 4 );
+						const ROWS_PER_FRAME = 256;
+						let rowStart = 0;
 
-							self._rasterEnvMapScheduled = false;
-							if ( self._previousRasterEnvMapSource !== source || self._rasterEnvMap ) return;
+						function processChunk() {
 
-							const { width, height, data } = source.image;
-							const stride = Math.floor( data.length / ( width * height ) );
-							const floatData = new Float32Array( width * height * 4 );
-							for ( let i = 0; i < width * height; i ++ ) {
+							if ( self._previousRasterEnvMapSource !== source || self._rasterEnvMap ) {
 
-								floatData[ 4 * i + 0 ] = DataUtils.fromHalfFloat( data[ stride * i + 0 ] );
-								floatData[ 4 * i + 1 ] = DataUtils.fromHalfFloat( data[ stride * i + 1 ] );
-								floatData[ 4 * i + 2 ] = DataUtils.fromHalfFloat( data[ stride * i + 2 ] );
-								floatData[ 4 * i + 3 ] = stride >= 4 ? DataUtils.fromHalfFloat( data[ stride * i + 3 ] ) : 1.0;
+								self._rasterEnvMapScheduled = false;
+								return;
 
 							}
 
-							self._rasterEnvMap = new DataTexture( floatData, width, height, RGBAFormat, FloatType, EquirectangularReflectionMapping, RepeatWrapping, ClampToEdgeWrapping, LinearFilter, LinearFilter );
-							self._rasterEnvMap.needsUpdate = true;
-							self._previousRasterEnvMapSource = source;
-							sc.environment = self._rasterEnvMap;
+							const rowEnd = Math.min( rowStart + ROWS_PER_FRAME, height );
+							for ( let row = rowStart; row < rowEnd; row ++ ) {
 
-						} );
+								for ( let col = 0; col < width; col ++ ) {
+
+									const i = row * width + col;
+									floatData[ 4 * i + 0 ] = DataUtils.fromHalfFloat( data[ stride * i + 0 ] );
+									floatData[ 4 * i + 1 ] = DataUtils.fromHalfFloat( data[ stride * i + 1 ] );
+									floatData[ 4 * i + 2 ] = DataUtils.fromHalfFloat( data[ stride * i + 2 ] );
+									floatData[ 4 * i + 3 ] = stride >= 4 ? DataUtils.fromHalfFloat( data[ stride * i + 3 ] ) : 1.0;
+
+								}
+
+							}
+
+							rowStart = rowEnd;
+
+							if ( rowStart >= height ) {
+
+								self._rasterEnvMapScheduled = false;
+								self._rasterEnvMap = new DataTexture( floatData, width, height, RGBAFormat, FloatType, EquirectangularReflectionMapping, RepeatWrapping, ClampToEdgeWrapping, LinearFilter, LinearFilter );
+								self._rasterEnvMap.needsUpdate = true;
+								self._previousRasterEnvMapSource = source;
+								sc.environment = self._rasterEnvMap;
+
+							} else {
+
+								requestAnimationFrame( processChunk );
+
+							}
+
+						}
+
+						requestAnimationFrame( processChunk );
 
 					}
 					// This frame: raster may use HalfFloat (one-frame delay); path tracer uses envMapInfo.map as-is

@@ -2929,6 +2929,8 @@ function getLights( scene ) {
 
 const MATERIAL_PIXELS = 47;
 const MATERIAL_STRIDE = MATERIAL_PIXELS * 4;
+// Cap atlas dimension to avoid unbounded GPU memory and upload cost for huge material counts
+const MAX_MATERIAL_ATLAS_DIMENSION = 4096;
 
 class MaterialFeatures {
 
@@ -3043,7 +3045,10 @@ class MaterialsTexture extends DataTexture {
 
 		let index = 0;
 		const pixelCount = materials.length * MATERIAL_PIXELS;
-		const dimension = Math.ceil( Math.sqrt( pixelCount ) ) || 1;
+		let dimension = Math.ceil( Math.sqrt( pixelCount ) ) || 1;
+		dimension = Math.min( dimension, MAX_MATERIAL_ATLAS_DIMENSION );
+		const maxPixels = dimension * dimension;
+		const maxMaterialsToWrite = Math.floor( maxPixels / MATERIAL_PIXELS );
 		const { image, features } = this;
 
 		// index the list of textures based on shareable source
@@ -3058,20 +3063,26 @@ class MaterialsTexture extends DataTexture {
 
 			this.dispose();
 
-			image.data = new Float32Array( dimension * dimension * 4 );
+			image.data = new Float32Array( maxPixels * 4 );
 			image.width = dimension;
 			image.height = dimension;
 
 		}
 
 		const floatArray = image.data;
+		const materialsToProcess = Math.min( materials.length, maxMaterialsToWrite );
+		if ( materialsToProcess < materials.length ) {
+
+			console.warn( `MaterialsTexture: material count ${ materials.length } exceeds atlas capacity (${ maxMaterialsToWrite }); only first ${ materialsToProcess } materials will be used.` );
+
+		}
 
 		// on some devices (Google Pixel 6) the "floatBitsToInt" function does not work correctly so we
 		// can't encode texture ids that way.
 		// const intArray = new Int32Array( floatArray.buffer );
 
 		features.reset();
-		for ( let i = 0, l = materials.length; i < l; i ++ ) {
+		for ( let i = 0, l = materialsToProcess; i < l; i ++ ) {
 
 			const m = materials[ i ];
 
@@ -7707,9 +7718,11 @@ class PhysicalPathTracingMaterial extends MaterialBase {
 
 						}
 
-						// shadow/reflection catcher: Production Grade V3
+						// shadow/reflection catcher: Production Grade V4
 						// V2 fixes: stable Fresnel, transmission mask, screen-blend alpha
 						// V3 fixes: per-texel radial alpha, dual-mode compositing (opaque/transparent background)
+						// V4 fixes: deterministic alpha (no stochastic transparency) — eliminates visible ground plane
+						//           RGB-Reflection / Alpha-Shadow split for correct premultiplied PNG output
 						if ( material.shadowReflectionCatcher && state.firstRay ) {
 
 							vec3 hitPoint = stepRayOrigin( ray.origin, ray.direction, surf.faceNormal, surfaceHit.dist );
@@ -7732,18 +7745,11 @@ class PhysicalPathTracingMaterial extends MaterialBase {
 
 							}
 
-							// Stochastic transparency at radial edges (matches getSurfaceRecord logic)
-							if ( material.transparent && texelAlpha < rand( 3 ) ) {
-
-								ray.origin = stepRayOrigin( ray.origin, ray.direction, - surfaceHit.faceNormal, surfaceHit.dist );
-								i -= sign( state.transmissiveTraversals );
-								state.transmissiveTraversals -= sign( state.transmissiveTraversals );
-								continue;
-
-							}
+							// REMOVED stochastic transparency — it caused pass-through rays to get
+							// alpha=1.0 from gl_FragColor initialization, making the floor visibly opaque.
+							// Instead, texelAlpha is used deterministically in the compositing below.
 
 							// --- 1. STABLE FRESNEL MASK (prevents "waver" ripples) ---
-							// Use perfect reflection vector so the mask does not jitter with roughness
 							vec3 perfectReflDir = reflect( ray.direction, surf.faceNormal );
 							vec3 stableHalfVector = normalize( - ray.direction + perfectReflDir );
 							float stableDotVH = saturate( dot( - ray.direction, stableHalfVector ) );
@@ -7785,7 +7791,6 @@ class PhysicalPathTracingMaterial extends MaterialBase {
 							} else {
 
 								// Reflection ray missed all geometry — sample the environment as reflection source.
-								// Without this, reflections go black when the emissive background plane is hidden.
 								reflectionColor = environmentIntensity * applyEnvSaturation(
 									sampleEquirectColor( envMapInfo.map, envRotation3x3 * reflDir )
 								);
@@ -7818,28 +7823,40 @@ class PhysicalPathTracingMaterial extends MaterialBase {
 							}
 							state.isShadowRay = false;
 
-							// --- 4. COMPOSITING (dual-mode: opaque vs transparent background) ---
-							vec3 backColor = sampleBackground( ray.direction, rand2( 2 ) );
-							vec3 finalReflection = reflectionColor * reflectionWeight * shadowCatcherReflectionIntensity * texelAlpha;
+							// --- 4. COMPOSITING: RGB-Reflection / Alpha-Shadow split ---
+							// This is the physically correct "shadow catcher composite" method:
+							// - RGB = pure reflection light (premultiplied)
+							// - Alpha = shadow density
+							// When composited: shadow darkens background via alpha, reflection adds light on top.
+							vec3 finalReflection = reflectionColor * reflectionWeight * shadowCatcherReflectionIntensity;
 
-							// --- 5. ALPHA (screen blend to avoid black circle, using per-texel alpha) ---
-							float reflectionLuma = dot( finalReflection, vec3( 0.2126, 0.7152, 0.0722 ) );
-							float reflAlpha = saturate( reflectionLuma * 1.5 );
+							// Shadow alpha: how much of the background light is blocked
 							float shadowAlpha = shadowFactor * texelAlpha;
-							shadowAlpha *= ( 1.0 - reflAlpha );
+
+							// Reflection alpha: derived from reflection luminance for black-object reflections
+							// Without this, reflecting a black object would produce (0,0,0,0) = invisible
+							float reflectionLuma = dot( finalReflection, vec3( 0.2126, 0.7152, 0.0722 ) );
+							float reflAlpha = saturate( reflectionLuma * 2.0 );
+
+							// Combined alpha: screen blend of shadow and reflection opacity
 							float combinedAlpha = 1.0 - ( 1.0 - shadowAlpha ) * ( 1.0 - reflAlpha );
 
 							if ( backgroundAlpha > 0.0 ) {
 
-								// Opaque background: composite shadow+reflection over sampled background
-								vec3 shadowedBackground = backColor * ( 1.0 - shadowFactor );
-								gl_FragColor.rgb = shadowedBackground * transmissionMask + finalReflection;
-								gl_FragColor.a = max( backgroundAlpha, combinedAlpha );
+								// Opaque background (live preview): floor is INVISIBLE.
+								// Composite as if floor doesn't exist — only shadow darkening + reflection additive.
+								vec3 backColor = sampleBackground( ray.direction, rand2( 2 ) );
+								vec3 result = backColor * ( 1.0 - shadowAlpha ) + finalReflection;
+								gl_FragColor.rgb = result;
+								gl_FragColor.a = backgroundAlpha;
 
 							} else {
 
-								// Transparent background: shadow via alpha only, reflection is additive RGB
-								// Prevents dark HDRI from bleeding into the ground plane
+								// Transparent background (PNG export): shadow via alpha, reflection via RGB.
+								// This produces a premultiplied-alpha PNG where:
+								//   Shadow → alpha > 0, RGB = 0 (darkens whatever is behind)
+								//   Reflection → alpha > 0, RGB = reflection light (adds light on top)
+								//   Empty → alpha = 0, RGB = 0 (fully transparent)
 								gl_FragColor.rgb = finalReflection;
 								gl_FragColor.a = combinedAlpha;
 
@@ -7986,9 +8003,9 @@ function* renderTask() {
 		_subframe,
 		alpha,
 		material,
+		_ogScissor,
+		_ogViewport,
 	} = this;
-	const _ogScissor = new Vector4();
-	const _ogViewport = new Vector4();
 
 	const blendMaterial = _blendQuad.material;
 	let [ blendTarget1, blendTarget2 ] = _blendTargets;
@@ -8192,6 +8209,8 @@ class PathTracingRenderer {
 		this._task = null;
 		this._currentTile = 0;
 		this._compilePromise = null;
+		this._ogScissor = new Vector4();
+		this._ogViewport = new Vector4();
 
 		this._sobolTarget = new SobolNumberMapGenerator().generate( renderer );
 
@@ -9184,29 +9203,55 @@ class WebGLPathTracer {
 						const self = this;
 						const source = sanitizedMap;
 						const sc = scene;
-						requestAnimationFrame( function buildRasterEnvMap() {
+						const { width, height, data } = source.image;
+						const stride = Math.floor( data.length / ( width * height ) );
+						const floatData = new Float32Array( width * height * 4 );
+						const ROWS_PER_FRAME = 256;
+						let rowStart = 0;
 
-							self._rasterEnvMapScheduled = false;
-							if ( self._previousRasterEnvMapSource !== source || self._rasterEnvMap ) return;
+						function processChunk() {
 
-							const { width, height, data } = source.image;
-							const stride = Math.floor( data.length / ( width * height ) );
-							const floatData = new Float32Array( width * height * 4 );
-							for ( let i = 0; i < width * height; i ++ ) {
+							if ( self._previousRasterEnvMapSource !== source || self._rasterEnvMap ) {
 
-								floatData[ 4 * i + 0 ] = DataUtils.fromHalfFloat( data[ stride * i + 0 ] );
-								floatData[ 4 * i + 1 ] = DataUtils.fromHalfFloat( data[ stride * i + 1 ] );
-								floatData[ 4 * i + 2 ] = DataUtils.fromHalfFloat( data[ stride * i + 2 ] );
-								floatData[ 4 * i + 3 ] = stride >= 4 ? DataUtils.fromHalfFloat( data[ stride * i + 3 ] ) : 1.0;
+								self._rasterEnvMapScheduled = false;
+								return;
 
 							}
 
-							self._rasterEnvMap = new DataTexture( floatData, width, height, RGBAFormat, FloatType, EquirectangularReflectionMapping, RepeatWrapping, ClampToEdgeWrapping, LinearFilter, LinearFilter );
-							self._rasterEnvMap.needsUpdate = true;
-							self._previousRasterEnvMapSource = source;
-							sc.environment = self._rasterEnvMap;
+							const rowEnd = Math.min( rowStart + ROWS_PER_FRAME, height );
+							for ( let row = rowStart; row < rowEnd; row ++ ) {
 
-						} );
+								for ( let col = 0; col < width; col ++ ) {
+
+									const i = row * width + col;
+									floatData[ 4 * i + 0 ] = DataUtils.fromHalfFloat( data[ stride * i + 0 ] );
+									floatData[ 4 * i + 1 ] = DataUtils.fromHalfFloat( data[ stride * i + 1 ] );
+									floatData[ 4 * i + 2 ] = DataUtils.fromHalfFloat( data[ stride * i + 2 ] );
+									floatData[ 4 * i + 3 ] = stride >= 4 ? DataUtils.fromHalfFloat( data[ stride * i + 3 ] ) : 1.0;
+
+								}
+
+							}
+
+							rowStart = rowEnd;
+
+							if ( rowStart >= height ) {
+
+								self._rasterEnvMapScheduled = false;
+								self._rasterEnvMap = new DataTexture( floatData, width, height, RGBAFormat, FloatType, EquirectangularReflectionMapping, RepeatWrapping, ClampToEdgeWrapping, LinearFilter, LinearFilter );
+								self._rasterEnvMap.needsUpdate = true;
+								self._previousRasterEnvMapSource = source;
+								sc.environment = self._rasterEnvMap;
+
+							} else {
+
+								requestAnimationFrame( processChunk );
+
+							}
+
+						}
+
+						requestAnimationFrame( processChunk );
 
 					}
 					// This frame: raster may use HalfFloat (one-frame delay); path tracer uses envMapInfo.map as-is

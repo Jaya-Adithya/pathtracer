@@ -306,8 +306,10 @@ export class ImageRenderModal {
 				this.scene.background = null;
 				this.renderer.setClearAlpha( 0 );
 				this.pathTracer.updateEnvironment();
+				// CRITICAL: Reset so accumulation uses new backgroundAlpha=0 (no solid floor/background)
+				if ( typeof this.pathTracer.reset === 'function' ) this.pathTracer.reset();
 				didSetTransparent = true;
-				console.log( '🎨 [Render] PNG without background — transparent background auto-enabled' );
+				console.log( '🎨 [Render] PNG without background — transparent background auto-enabled, path tracer reset' );
 
 			} else if ( shouldCaptureBackground && bgImageSrc ) {
 
@@ -315,6 +317,7 @@ export class ImageRenderModal {
 				this.scene.background = null;
 				this.renderer.setClearAlpha( 0 );
 				this.pathTracer.updateEnvironment();
+				if ( typeof this.pathTracer.reset === 'function' ) this.pathTracer.reset();
 				didSetTransparent = true;
 				console.log( '🎨 [Render] With background — set transparent for compositing' );
 
@@ -769,13 +772,47 @@ export class ImageRenderModal {
 
 	}
 
+	/**
+	 * Capture PNG with alpha preserved. WebGL canvas.toDataURL() often loses alpha;
+	 * reading via readPixels and writing to a 2D canvas ensures transparent background
+	 * is correctly exported (same approach as test-pt / ground plane PNG).
+	 */
+	capturePNGWithAlpha( canvas ) {
+
+		const gl = this.renderer.getContext();
+		const w = canvas.width;
+		const h = canvas.height;
+		const pixels = new Uint8Array( w * h * 4 );
+		gl.readPixels( 0, 0, w, h, gl.RGBA, gl.UNSIGNED_BYTE, pixels );
+		// readPixels is bottom-to-top; ImageData is top-to-bottom — flip rows
+		const flipped = new Uint8ClampedArray( w * h * 4 );
+		for ( let y = 0; y < h; y ++ ) {
+
+			const srcRow = h - 1 - y;
+			for ( let i = 0; i < w * 4; i ++ ) {
+
+				flipped[ y * w * 4 + i ] = pixels[ srcRow * w * 4 + i ];
+
+			}
+
+		}
+		const tempCanvas = document.createElement( 'canvas' );
+		tempCanvas.width = w;
+		tempCanvas.height = h;
+		const ctx = tempCanvas.getContext( '2d' );
+		const imageData = new ImageData( flipped, w, h );
+		ctx.putImageData( imageData, 0, 0 );
+		return tempCanvas.toDataURL( 'image/png', 1.0 );
+
+	}
+
 	async captureImage( canvas ) {
 
 		const format = this.settings.format.toUpperCase();
 
 		if ( format === 'PNG' ) {
 
-			return canvas.toDataURL( 'image/png', 1.0 );
+			return this.capturePNGWithAlpha( canvas );
 
 		} else if ( format === 'JPG' || format === 'JPEG' ) {
 
@@ -784,10 +821,9 @@ export class ImageRenderModal {
 
 		} else if ( format === 'PSD' ) {
 
-			// For PSD, we'll export as PNG with .psd extension
-			// Full PSD support would require a library like psd.js
+			// For PSD, we'll export as PNG with .psd extension (alpha preserved)
 			console.warn( 'PSD format not fully supported, exporting as PNG with .psd extension' );
-			return canvas.toDataURL( 'image/png', 1.0 );
+			return this.capturePNGWithAlpha( canvas );
 
 		}
 

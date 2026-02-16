@@ -16,9 +16,9 @@ function* renderTask() {
 		_subframe,
 		alpha,
 		material,
+		_ogScissor,
+		_ogViewport,
 	} = this;
-	const _ogScissor = new Vector4();
-	const _ogViewport = new Vector4();
 
 	const blendMaterial = _blendQuad.material;
 	let [ blendTarget1, blendTarget2 ] = _blendTargets;
@@ -222,6 +222,8 @@ export class PathTracingRenderer {
 		this._task = null;
 		this._currentTile = 0;
 		this._compilePromise = null;
+		this._ogScissor = new Vector4();
+		this._ogViewport = new Vector4();
 
 		this._sobolTarget = new SobolNumberMapGenerator().generate( renderer );
 

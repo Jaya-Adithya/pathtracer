@@ -483,43 +483,21 @@ export class PhysicalPathTracingMaterial extends MaterialBase {
 
 						}
 
-						// shadow/reflection catcher: Production Grade V3
+						// shadow/reflection catcher: Production Grade V4
 						// V2 fixes: stable Fresnel, transmission mask, screen-blend alpha
 						// V3 fixes: per-texel radial alpha, dual-mode compositing (opaque/transparent background)
+						// V4 fixes: deterministic alpha (no stochastic transparency) — eliminates visible ground plane
+						//           RGB-Reflection / Alpha-Shadow split for correct premultiplied PNG output
+						// V4 (same as V2 for alpha): use uniform opacity only — full-plane reflection/shadows
+						// like test-pt; floor map is not sampled so no radial circle.
 						if ( material.shadowReflectionCatcher && state.firstRay ) {
 
 							vec3 hitPoint = stepRayOrigin( ray.origin, ray.direction, surf.faceNormal, surfaceHit.dist );
 
-							// --- 0. PER-TEXEL ALPHA for radial floor fade ---
-							vec2 catcherUV = textureSampleBarycoord(
-								attributesArray, ATTR_UV, surfaceHit.barycoord, surfaceHit.faceIndices.xyz
-							).xy;
+							// --- 0. UNIFORM ALPHA (match V2 / test-pt: full plane, no map sampling) ---
 							float texelAlpha = material.opacity;
-							if ( material.map != - 1 ) {
-
-								vec3 uvPrime = material.mapTransform * vec3( catcherUV, 1 );
-								texelAlpha *= texture2D( textures, vec3( uvPrime.xy, material.map ) ).a;
-
-							}
-							if ( material.alphaMap != - 1 ) {
-
-								vec3 uvPrime = material.alphaMapTransform * vec3( catcherUV, 1 );
-								texelAlpha *= texture2D( textures, vec3( uvPrime.xy, material.alphaMap ) ).x;
-
-							}
-
-							// Stochastic transparency at radial edges (matches getSurfaceRecord logic)
-							if ( material.transparent && texelAlpha < rand( 3 ) ) {
-
-								ray.origin = stepRayOrigin( ray.origin, ray.direction, - surfaceHit.faceNormal, surfaceHit.dist );
-								i -= sign( state.transmissiveTraversals );
-								state.transmissiveTraversals -= sign( state.transmissiveTraversals );
-								continue;
-
-							}
 
 							// --- 1. STABLE FRESNEL MASK (prevents "waver" ripples) ---
-							// Use perfect reflection vector so the mask does not jitter with roughness
 							vec3 perfectReflDir = reflect( ray.direction, surf.faceNormal );
 							vec3 stableHalfVector = normalize( - ray.direction + perfectReflDir );
 							float stableDotVH = saturate( dot( - ray.direction, stableHalfVector ) );
@@ -558,15 +536,8 @@ export class PhysicalPathTracingMaterial extends MaterialBase {
 									reflectionColor = reflSurf.emission + directLightContribution( - reflDir, reflSurf, state, reflHitPoint );
 								}
 
-							} else {
-
-								// Reflection ray missed all geometry — sample the environment as reflection source.
-								// Without this, reflections go black when the emissive background plane is hidden.
-								reflectionColor = environmentIntensity * applyEnvSaturation(
-									sampleEquirectColor( envMapInfo.map, envRotation3x3 * reflDir )
-								);
-
 							}
+							// Match test-pt V2: no env sample when reflection misses — reflectionColor stays 0
 
 							// --- 3. SHADOW TRACING ---
 							float shadowFactor = 0.0;
@@ -594,32 +565,19 @@ export class PhysicalPathTracingMaterial extends MaterialBase {
 							}
 							state.isShadowRay = false;
 
-							// --- 4. COMPOSITING (dual-mode: opaque vs transparent background) ---
+							// --- 4. COMPOSITING (match test-pt V2 exactly: transmission mask + same alpha) ---
 							vec3 backColor = sampleBackground( ray.direction, rand2( 2 ) );
-							vec3 finalReflection = reflectionColor * reflectionWeight * shadowCatcherReflectionIntensity * texelAlpha;
+							vec3 shadowedBackground = backColor * ( 1.0 - shadowFactor );
+							vec3 finalReflection = reflectionColor * reflectionWeight * shadowCatcherReflectionIntensity;
+							gl_FragColor.rgb = shadowedBackground * transmissionMask + finalReflection;
 
-							// --- 5. ALPHA (screen blend to avoid black circle, using per-texel alpha) ---
+							// --- 5. ALPHA (test-pt V2: screen blend, same formula for opaque and transparent) ---
 							float reflectionLuma = dot( finalReflection, vec3( 0.2126, 0.7152, 0.0722 ) );
 							float reflAlpha = saturate( reflectionLuma * 1.5 );
 							float shadowAlpha = shadowFactor * texelAlpha;
 							shadowAlpha *= ( 1.0 - reflAlpha );
 							float combinedAlpha = 1.0 - ( 1.0 - shadowAlpha ) * ( 1.0 - reflAlpha );
-
-							if ( backgroundAlpha > 0.0 ) {
-
-								// Opaque background: composite shadow+reflection over sampled background
-								vec3 shadowedBackground = backColor * ( 1.0 - shadowFactor );
-								gl_FragColor.rgb = shadowedBackground * transmissionMask + finalReflection;
-								gl_FragColor.a = max( backgroundAlpha, combinedAlpha );
-
-							} else {
-
-								// Transparent background: shadow via alpha only, reflection is additive RGB
-								// Prevents dark HDRI from bleeding into the ground plane
-								gl_FragColor.rgb = finalReflection;
-								gl_FragColor.a = combinedAlpha;
-
-							}
+							gl_FragColor.a = max( backgroundAlpha, combinedAlpha );
 
 							break;
 
