@@ -504,8 +504,21 @@ export class PhysicalPathTracingMaterial extends MaterialBase {
 							vec3 f0 = mix( vec3( surf.f0 * surf.specularIntensity ), surf.color, surf.metalness );
 							vec3 transmissionMask = vec3( 1.0 ) - schlickFresnel( stableDotVH, f0 );
 
-							// --- 2. REFLECTION TRACING (roughness-aware ray) ---
+							// --- 2. REFLECTION TRACING: use mirror (roughness 0) so reflection is sharp and full strength.
+							// Floor roughness would blur and dim the reflection; forcing 0 matches a perfect mirror.
+							float savedRoughness = surf.roughness;
+							float savedFilteredRoughness = surf.filteredRoughness;
+							float savedClearcoatRoughness = surf.clearcoatRoughness;
+							float savedFilteredClearcoatRoughness = surf.filteredClearcoatRoughness;
+							surf.roughness = 0.0;
+							surf.filteredRoughness = 0.0;
+							surf.clearcoatRoughness = 0.0;
+							surf.filteredClearcoatRoughness = 0.0;
 							ScatterRecord catcherScatter = bsdfSample( - ray.direction, surf );
+							surf.roughness = savedRoughness;
+							surf.filteredRoughness = savedFilteredRoughness;
+							surf.clearcoatRoughness = savedClearcoatRoughness;
+							surf.filteredClearcoatRoughness = savedFilteredClearcoatRoughness;
 							vec3 reflectionWeight = vec3( 0.0 );
 							if ( catcherScatter.pdf > 0.0 ) {
 								reflectionWeight = catcherScatter.color / catcherScatter.pdf;

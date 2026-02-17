@@ -146,7 +146,7 @@ const params = {
 	floorColor: '#111111',
 	floorOpacity: 1.0,
 	floorShadowOpacity: 0.5, // Shadow Catcher only: intensity of shadow on ground (0–2)
-	floorReflectionIntensity: 2.0, // Shadow Catcher: intensity of reflection on ground (0–10, high = brighter)
+	floorReflectionIntensity: 3.0, // Shadow Catcher: intensity of reflection on ground (0–20, high = brighter)
 	floorRoughness: 0.2,
 	floorMetalness: 0.2,
 	floorTransmission: 0.0,
@@ -789,6 +789,13 @@ function onParamsChange() {
 
 	pathTracer.updateMaterials();
 	pathTracer.updateEnvironment();
+
+	// Ground reflection 3x boost: slider value 10 → intensity 30 in renderer (after updateMaterials so it is not overwritten)
+	if ( params.floorShadowReflectionCatcher ) {
+
+		pathTracer.shadowCatcherReflectionIntensity = params.floorReflectionIntensity * 3.0;
+
+	}
 
 }
 
@@ -1829,7 +1836,7 @@ function buildGui() {
 	const shadowOpacityCtrl = floorFolder.add( params, 'floorShadowOpacity', 0, 2 ).onChange( onParamsChange ).name( 'Shadow opacity' );
 
 	// Shadow Catcher: reflection intensity on ground (high = brighter reflection)
-	floorFolder.add( params, 'floorReflectionIntensity', 0, 10, 0.1 ).onChange( onParamsChange ).name( 'Reflection intensity' );
+	floorFolder.add( params, 'floorReflectionIntensity', 0, 20, 0.1 ).onChange( onParamsChange ).name( 'Reflection intensity' );
 
 	// Shared controls (visible in all modes)
 	floorFolder.add( params, 'floorRoughness', 0, 1 ).onChange( onParamsChange );

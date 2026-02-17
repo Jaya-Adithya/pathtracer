@@ -150,6 +150,7 @@ export class WebGLPathTracer {
 
 	productSaturation: number;
 	productContrast: number;
+	shadowCatcherReflectionIntensity: number;
 
 	setBVHWorker( bvhWorker: BVHWorker ): void;
 	setScene(

@@ -141,6 +141,19 @@ export class WebGLPathTracer {
 
 	}
 
+	get shadowCatcherReflectionIntensity() {
+
+		return this._pathTracer.material.uniforms.shadowCatcherReflectionIntensity?.value ?? 1.0;
+
+	}
+
+	set shadowCatcherReflectionIntensity( v ) {
+
+		const u = this._pathTracer.material.uniforms.shadowCatcherReflectionIntensity;
+		if ( u ) u.value = v;
+
+	}
+
 	constructor( renderer ) {
 
 		// members

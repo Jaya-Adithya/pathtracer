@@ -28,7 +28,10 @@ export const MODEL_LIST = {
 		url: assetUrl( '../assets/Flexera_Folding_PT_V2.glb' ),
 		credit: 'Custom Model',
 	},
-
+	'Flexera Studio Wood Sring PT': {
+		url: assetUrl( '../assets/Flexera Studio_Wood_String_PT.glb' ),
+		credit: 'Custom Model',
+	},
 	
 	'ITUS': {
 		url: assetUrl( '../assets/ITUS_3.glb' ),
