@@ -29,7 +29,7 @@ export const MODEL_LIST = {
 		credit: 'Custom Model',
 	},
 	'Flexera Studio Wood Sring PT': {
-		url: assetUrl( '../assets/Flexera_Studio_Wood_String_PT.glb' ),
+		url: assetUrl( '../assets/Flexera_Studio_Wood_Spring_PT.glb' ),
 		credit: 'Custom Model',
 	},
 	
