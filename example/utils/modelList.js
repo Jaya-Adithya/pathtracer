@@ -32,6 +32,7 @@ export const MODEL_LIST = {
 		url: assetUrl( '../assets/Flexera_Studio_Wood_Spring_PT.glb' ),
 		credit: 'Custom Model',
 	},
+	
 
 	'Flexera PT V3': {
 		url: assetUrl( 'https://flexera-studio-assets.s3.us-east-1.amazonaws.com/Flexera_Folding_PT_V3.glb' ),
