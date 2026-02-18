@@ -38,6 +38,10 @@ export const MODEL_LIST = {
 		credit: 'Custom Model',
 	},
 	
+	'Flexera PT V4': {
+		url: assetUrl( '../assets/Flexera_Folding_PT_V3-2.glb' ),
+		credit: 'Custom Model',
+	},
 	'ITUS': {
 		url: assetUrl( '../assets/ITUS_3.glb' ),
 		credit: 'Custom Model',
