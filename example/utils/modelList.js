@@ -55,6 +55,10 @@ export const MODEL_LIST = {
 		url: assetUrl( '../assets/Headphone_Static.glb' ),
 		credit: 'Custom Model',
 	},
+	'Flexera Folding V5': {
+		url: assetUrl( '../assets/Flexera_Folding_PT_V5.glb' ),
+		credit: 'Custom Model',
+	},
 	'M2020 Rover': {
 		url: 'https://raw.githubusercontent.com/gkjohnson/3d-demo-data/main/models/nasa-m2020/Perseverance.glb',
 		credit: 'Model credit NASA / JPL-Caltech',
