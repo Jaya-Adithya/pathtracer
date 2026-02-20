@@ -183,6 +183,8 @@ let controls, scene, model;
 let gradientMap;
 let loader;
 let models;
+const UPLOADED_GLB_KEY = 'Uploaded GLB'; // Cache key for user-uploaded GLB (in-memory object URL)
+let uploadedModelUrl = null; // Object URL for current uploaded GLB; revoked when replaced or on unload
 let screenMesh = null;
 let uploadedTexture = null;
 let uploadedImage = null; // ✅ NEW: Store original image for brightness/saturation reprocessing
@@ -505,6 +507,11 @@ async function init() {
 
 	window.addEventListener( 'resize', onResize );
 	window.addEventListener( 'hashchange', onHashChange );
+	window.addEventListener( 'beforeunload', () => {
+
+		if ( uploadedModelUrl ) URL.revokeObjectURL( uploadedModelUrl );
+
+	} );
 
 	// Click-to-focus for Depth of Field
 	window.addEventListener( 'pointerdown', onFocusPointerDown );
@@ -1433,6 +1440,37 @@ function buildGui() {
 
 	} );
 
+	// Upload GLB: load a .glb/.gltf file and cache it in memory (object URL) for use like any other model
+	gui.add( {
+		uploadGLB: () => {
+
+			const input = document.createElement( 'input' );
+			input.type = 'file';
+			input.accept = '.glb,.gltf';
+			input.style.display = 'none';
+			input.addEventListener( 'change', () => {
+
+				const file = input.files && input.files[ 0 ];
+				if ( ! file ) return;
+				if ( uploadedModelUrl ) {
+
+					URL.revokeObjectURL( uploadedModelUrl );
+					uploadedModelUrl = null;
+
+				}
+				uploadedModelUrl = URL.createObjectURL( file );
+				models[ UPLOADED_GLB_KEY ] = { url: uploadedModelUrl, credit: 'Uploaded' };
+				params.model = UPLOADED_GLB_KEY;
+				window.location.hash = UPLOADED_GLB_KEY;
+				buildGui();
+				updateModel();
+
+			} );
+			input.click();
+
+		}
+	}, 'uploadGLB' ).name( 'Upload GLB' );
+
 	// Animation frame control at top (like GLBViewer ControlPanel: Frames 0–150)
 	if ( animationMixer && mainAnimAction && mainAnimClip ) {
 
@@ -1885,8 +1923,9 @@ function buildGui() {
 
 	floorFolder.open();
 
-	// Screen controls: only show when wallpaper meshes were detected
-	if ( Object.keys( wallpaperMeshes ).some( key => wallpaperMeshes[ key ] !== null ) ) {
+	// Screen controls: show when any predefined wallpaper meshes exist, or when screenMesh exists (e.g. uploaded GLB)
+	const hasAnyWallpaperMeshes = Object.keys( wallpaperMeshes ).some( key => wallpaperMeshes[ key ] !== null );
+	if ( hasAnyWallpaperMeshes || screenMesh ) {
 
 		const screenFolder = gui.addFolder( 'Screen' );
 
@@ -1895,6 +1934,7 @@ function buildGui() {
 		const availableWallpapers = wallpaperOptions.filter( option => {
 
 			if ( option === 'custom' || option === 'off_screen' ) return true;
+			if ( option === 'blank_screen' ) return wallpaperMeshes[ option ] !== null || screenMesh;
 			return wallpaperMeshes[ option ] !== null;
 
 		} );
@@ -2835,6 +2875,13 @@ async function updateWallpaperVisibility( selectedWallpaper ) {
 
 		}
 
+	} else if ( selectedWallpaper === 'blank_screen' && screenMesh && ! wallpaperMeshes[ 'blank_screen' ] ) {
+
+		// Model has no predefined blank_screen (e.g. uploaded GLB); use screenMesh so the screen is visible
+		targetMesh = screenMesh;
+		targetMeshInfo = allScreenMeshes.find( info => info.mesh === screenMesh );
+		console.log( `\n🎯 BLANK SCREEN (fallback to screen mesh): "${screenMesh.name}"` );
+
 	} else if ( wallpaperMeshes[ selectedWallpaper ] ) {
 
 		const selectedMesh = wallpaperMeshes[ selectedWallpaper ];
@@ -3585,8 +3632,14 @@ async function updateModel() {
 
 		} );
 
-		// Show only the selected wallpaper
-		const targetMesh = wallpaperMeshes[ currentWallpaper ];
+		// Show only the selected wallpaper (or fallback to screenMesh when model has no predefined wallpapers, e.g. uploaded GLB)
+		let targetMesh = wallpaperMeshes[ currentWallpaper ];
+		if ( ! targetMesh && currentWallpaper === 'blank_screen' && screenMesh ) {
+
+			targetMesh = screenMesh;
+			console.log( `✅ No predefined "blank_screen" mesh; showing screen mesh: ${screenMesh.name}` );
+
+		}
 		if ( targetMesh ) {
 
 			targetMesh.visible = true;
@@ -3775,8 +3828,9 @@ async function loadModel( url, onProgress ) {
 
 		return { scene: res.scene, animations: [] };
 
-	} else if ( /(gltf|glb)$/i.test( url ) ) {
+	} else if ( /(gltf|glb)$/i.test( url ) || ( typeof url === 'string' && url.startsWith( 'blob:' ) ) ) {
 
+		// blob: URLs (e.g. from Upload GLB) have no extension; load as GLB/GLTF
 		const dracoLoader = new DRACOLoader( manager );
 		dracoLoader.setDecoderPath( 'https://www.gstatic.com/draco/versioned/decoders/1.5.7/' );
 
