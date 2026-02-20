@@ -47,6 +47,8 @@ export const MODEL_LIST = {
 		url: assetUrl( '../assets/ITUS_3.glb' ),
 		credit: 'Custom Model',
 	},
+
+	
 	'ASUS P5 V5': {
 		url: assetUrl( '../assets/ASUS_P5_V5_noLogo.glb' ),
 		credit: 'Custom Model',
