@@ -761,6 +761,7 @@ function onParamsChange() {
 		floorPlane.material.opacity = params.floorOpacity;
 		floorPlane.material.transparent = params.floorOpacity < 1 || params.floorTransmission > 0;
 
+		
 	}
 
 	syncSceneEnvironmentFromParams();
